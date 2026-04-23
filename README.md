@@ -27,6 +27,8 @@ Alur utama dibagi menjadi 2 tempat:
   Menyimpan daftar klaim hadiah yang sudah diteruskan ke admin dan menunggu balasan `Done`.
 - [private_claim_statuses.json](c:/Users/Bot-telegram/private_claim_statuses.json)
   Menyimpan status klaim private per member agar status `validated`, `awaiting_admin`, dan `completed` tetap ada walau bot restart.
+- [private_chat_logs.json](c:/Users/Bot-telegram/private_chat_logs.json)
+  Menyimpan log percakapan private member dan balasan bot untuk kebutuhan dashboard admin.
 
 ## Konfigurasi Environment
 
@@ -48,6 +50,13 @@ Keterangan:
 - `BOT_TOKEN`: token bot Telegram dari BotFather.
 - `GOOGLE_SCRIPT_URL`: URL Web App Apps Script yang berakhiran `/exec`.
 - `TESSERACT_CMD`: opsional untuk Windows jika `tesseract.exe` belum masuk PATH. Di Railway biasanya tidak perlu jika package `tesseract` sudah tersedia di image deploy.
+
+Dashboard admin membaca identitas admin dari:
+
+- `ADMIN_USERNAME`
+- `ADMIN_CHAT_ID`
+
+Jika `ADMIN_CHAT_ID` belum diisi, bot tetap bisa mengenali admin dari username sesuai `ADMIN_USERNAME`.
 
 ## Alur Bot di Chat Grup
 
@@ -118,7 +127,7 @@ https://www.horeg22.net/register
 Mengarah ke:
 
 ```text
-https://ls.aloka4d.xyz/index.html
+https://lckyspn.netlify.app/
 ```
 
 ### 4. Respon Keyword di Grup
@@ -144,8 +153,31 @@ Respon umumnya:
 
 Bot mencoba menghapus pesan yang mengandung link selain domain berikut:
 
-- `ls.aloka4d.xyz`
+- `lckyspn.netlify.app`
 - `horeg22.net`
+
+## Dashboard Admin
+
+Bot sekarang punya dashboard internal yang hanya bisa diakses admin lewat private chat bot.
+
+Command:
+
+```text
+/dashboard
+```
+
+Fungsi dashboard:
+
+- melihat daftar chat private member yang terekam
+- melihat update terakhir tiap member
+- membuka detail percakapan per member lewat tombol inline
+- melihat pesan masuk member dan balasan bot pada flow private chat
+
+Keamanan akses:
+
+- hanya akun yang cocok dengan `ADMIN_USERNAME` atau `ADMIN_CHAT_ID` yang bisa membuka dashboard
+- akun owner `@trustno_one9` juga bisa membuka dashboard
+- chat admin tidak disimpan sebagai chat member di file log
 
 ## Alur Bot di Chat Pribadi
 
@@ -426,6 +458,12 @@ Ini adalah file dari sistem assignment lokal lama. Saat ini flow ambil kode via 
 Dipakai untuk menyimpan status klaim private yang aktif maupun yang sudah selesai, sehingga member masih bisa cek `status klaim` meskipun bot baru saja restart.
 Status yang `updated_at`-nya lebih lama dari 7 hari akan dibersihkan otomatis saat data di-load atau saat ada update status baru.
 
+### `private_chat_logs.json`
+
+Dipakai untuk menyimpan histori percakapan private antara member dan bot.
+Log ini dipakai oleh dashboard admin dan dibersihkan otomatis jika tidak diperbarui lebih dari 14 hari.
+Setiap chat disimpan dengan batas entry terbaru agar ukuran file tetap terkendali.
+
 ## Handler Utama di bot.py
 
 Beberapa handler utama:
@@ -444,6 +482,8 @@ Beberapa handler utama:
   Membaca screenshot hasil Lucky Spin di private chat dan menjalankan OCR.
 - `handle_private_general_text`
   Menangani intent chat bebas di private chat seperti panduan, login, status klaim, bantuan, dan follow-up member.
+- `admin_dashboard`
+  Menampilkan dashboard admin untuk melihat daftar chat member dan isi percakapan private.
 - `notify_admin_claim`
   Meneruskan klaim hadiah hasil OCR ke admin.
 - `auto_reply`
