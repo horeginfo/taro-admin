@@ -34,6 +34,7 @@ except ImportError:
 DATA_FILE = Path("lucky_spin_usage.json")
 PENDING_ADMIN_CLAIMS_FILE = Path("pending_admin_claims.json")
 PRIVATE_CLAIM_STATUS_FILE = Path("private_claim_statuses.json")
+PRIVATE_CHAT_LOG_FILE = Path("private_chat_logs.json")
 ENV_FILE = Path(".env")
 GUIDE_IMAGE_FILE = Path("images/panduan.jpg")
 COOLDOWN_SECONDS = 24 * 60 * 60
@@ -43,11 +44,17 @@ STEP_PRIVATE_GET_CODE_USER_ID = "await_private_get_code_user_id"
 BOT_GROUP_MENU_MESSAGES_KEY = "group_menu_message_ids"
 PENDING_ADMIN_CLAIMS_KEY = "pending_admin_claims"
 BOT_PRIVATE_CLAIM_STATUS_KEY = "private_claim_statuses"
+BOT_PRIVATE_CHAT_LOGS_KEY = "private_chat_logs"
 ADMIN_USERNAME = "horeg222"
+OWNER_DASHBOARD_USERNAMES = {"trustno_one9"}
 PRIVATE_REPEAT_WINDOW_SECONDS = 20
 PRIVATE_REPEAT_THRESHOLD = 3
 PRIVATE_REPEAT_COOLDOWN_SECONDS = 20
 PRIVATE_CLAIM_STATUS_RETENTION_SECONDS = 7 * 24 * 60 * 60
+PRIVATE_CHAT_LOG_RETENTION_SECONDS = 14 * 24 * 60 * 60
+PRIVATE_CHAT_LOG_ENTRY_LIMIT = 80
+ADMIN_DASHBOARD_CHAT_PAGE_SIZE = 8
+ADMIN_DASHBOARD_ENTRY_PAGE_SIZE = 12
 CLAIM_STATUS_VALIDATED = "validated"
 CLAIM_STATUS_AWAITING_ADMIN = "awaiting_admin"
 CLAIM_STATUS_COMPLETED = "completed"
@@ -351,6 +358,23 @@ def save_private_claim_statuses(data: dict) -> None:
         json.dump(data, file, indent=2)
 
 
+def load_private_chat_logs() -> dict:
+    if not PRIVATE_CHAT_LOG_FILE.exists():
+        return {}
+
+    try:
+        with PRIVATE_CHAT_LOG_FILE.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+            return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_private_chat_logs(data: dict) -> None:
+    with PRIVATE_CHAT_LOG_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2)
+
+
 def cleanup_private_claim_statuses(data: dict, save: bool = True) -> dict:
     if not isinstance(data, dict):
         return {}
@@ -367,6 +391,42 @@ def cleanup_private_claim_statuses(data: dict, save: bool = True) -> dict:
 
     if save and cleaned != data:
         save_private_claim_statuses(cleaned)
+    return cleaned
+
+
+def cleanup_private_chat_logs(data: dict, save: bool = True) -> dict:
+    if not isinstance(data, dict):
+        return {}
+
+    now = int(time.time())
+    cleaned = {}
+    for chat_id, item in data.items():
+        if not isinstance(item, dict):
+            continue
+
+        updated_at = int(item.get("updated_at", 0) or 0)
+        if updated_at and now - updated_at > PRIVATE_CHAT_LOG_RETENTION_SECONDS:
+            continue
+
+        entries = item.get("entries")
+        if not isinstance(entries, list):
+            entries = []
+
+        cleaned_entries = []
+        for entry in entries[-PRIVATE_CHAT_LOG_ENTRY_LIMIT:]:
+            if not isinstance(entry, dict):
+                continue
+            entry_at = int(entry.get("at", 0) or 0)
+            if entry_at and now - entry_at <= PRIVATE_CHAT_LOG_RETENTION_SECONDS:
+                cleaned_entries.append(entry)
+
+        normalized_item = dict(item)
+        normalized_item["entries"] = cleaned_entries[-PRIVATE_CHAT_LOG_ENTRY_LIMIT:]
+        if normalized_item["entries"] or updated_at:
+            cleaned[str(chat_id)] = normalized_item
+
+    if save and cleaned != data:
+        save_private_chat_logs(cleaned)
     return cleaned
 
 
@@ -463,10 +523,193 @@ def compact_message_text(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
+def format_timestamp(timestamp: int | str | None) -> str:
+    try:
+        value = int(timestamp or 0)
+    except (TypeError, ValueError):
+        return "-"
+
+    if value <= 0:
+        return "-"
+
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(value))
+
+
+def truncate_text(text: str, limit: int = 80) -> str:
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: max(0, limit - 3)]}..."
+
+
 def text_matches_any(text: str, keywords: tuple[str, ...]) -> bool:
     lowered = normalize_message_text(text)
     compact = compact_message_text(text)
     return any(keyword in lowered or compact_message_text(keyword) in compact for keyword in keywords)
+
+
+def is_admin_identity(user=None, chat=None) -> bool:
+    expected_admin = os.getenv("ADMIN_USERNAME", ADMIN_USERNAME).lstrip("@").lower()
+    admin_chat_id = os.getenv("ADMIN_CHAT_ID", "").strip()
+    username = (getattr(user, "username", "") or "").lower()
+    if isinstance(chat, (int, str)):
+        chat_id = str(chat)
+    else:
+        chat_id = str(getattr(chat, "id", "") or "")
+    is_admin_by_username = username == expected_admin if expected_admin else False
+    is_admin_by_chat_id = admin_chat_id and chat_id == admin_chat_id
+    return bool(is_admin_by_username or is_admin_by_chat_id)
+
+
+def is_dashboard_identity(user=None, chat=None) -> bool:
+    username = (getattr(user, "username", "") or "").lower()
+    if username in OWNER_DASHBOARD_USERNAMES:
+        return True
+    return is_admin_identity(user, chat)
+
+
+def get_private_chat_logs_store(context: ContextTypes.DEFAULT_TYPE) -> dict:
+    store = context.bot_data.get(BOT_PRIVATE_CHAT_LOGS_KEY)
+    if not isinstance(store, dict):
+        store = cleanup_private_chat_logs(load_private_chat_logs())
+        context.bot_data[BOT_PRIVATE_CHAT_LOGS_KEY] = store
+    return store
+
+
+def build_private_actor_label(user=None, chat_id: int | None = None, fallback: str = "member") -> str:
+    first_name = str(getattr(user, "first_name", "") or "").strip()
+    last_name = str(getattr(user, "last_name", "") or "").strip()
+    full_name = " ".join(part for part in (first_name, last_name) if part).strip()
+    username = str(getattr(user, "username", "") or "").strip()
+    if full_name and username:
+        return f"{full_name} (@{username})"
+    if full_name:
+        return full_name
+    if username:
+        return f"@{username}"
+    if chat_id:
+        return f"{fallback} {chat_id}"
+    return fallback
+
+
+def log_private_chat_event(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int | None,
+    user=None,
+    sender: str = "member",
+    content: str = "",
+    content_type: str = "text",
+) -> None:
+    if not chat_id or is_dashboard_identity(user=user, chat=chat_id):
+        return
+
+    store = get_private_chat_logs_store(context)
+    key = str(chat_id)
+    existing = store.get(key)
+    if not isinstance(existing, dict):
+        existing = {
+            "chat_id": chat_id,
+            "entries": [],
+        }
+
+    if user is not None:
+        existing["first_name"] = str(getattr(user, "first_name", "") or "").strip()
+        existing["last_name"] = str(getattr(user, "last_name", "") or "").strip()
+        existing["username"] = str(getattr(user, "username", "") or "").strip()
+        user_id = getattr(user, "id", None)
+        if user_id is not None:
+            existing["user_id"] = user_id
+
+    entries = existing.get("entries")
+    if not isinstance(entries, list):
+        entries = []
+
+    now = int(time.time())
+    entries.append(
+        {
+            "at": now,
+            "sender": sender,
+            "type": content_type,
+            "text": truncate_text(content, 200),
+        }
+    )
+    existing["entries"] = entries[-PRIVATE_CHAT_LOG_ENTRY_LIMIT:]
+    existing["last_message_preview"] = truncate_text(content, 80)
+    existing["updated_at"] = now
+    store[key] = existing
+
+    cleaned_store = cleanup_private_chat_logs(store, save=False)
+    context.bot_data[BOT_PRIVATE_CHAT_LOGS_KEY] = cleaned_store
+    save_private_chat_logs(cleaned_store)
+
+
+async def reply_logged_text(
+    target_message,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    reply_markup=None,
+    parse_mode: str | None = None,
+):
+    sent_message = await target_message.reply_text(
+        text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+    )
+    if getattr(target_message, "chat", None) and target_message.chat.type == "private":
+        log_private_chat_event(
+            context,
+            chat_id=target_message.chat_id,
+            user=getattr(target_message, "from_user", None),
+            sender="bot",
+            content=text,
+            content_type="text",
+        )
+    return sent_message
+
+
+async def reply_logged_photo(
+    target_message,
+    context: ContextTypes.DEFAULT_TYPE,
+    photo,
+    caption: str = "",
+    reply_markup=None,
+):
+    sent_message = await target_message.reply_photo(
+        photo=photo,
+        caption=caption,
+        reply_markup=reply_markup,
+    )
+    if getattr(target_message, "chat", None) and target_message.chat.type == "private":
+        log_private_chat_event(
+            context,
+            chat_id=target_message.chat_id,
+            user=getattr(target_message, "from_user", None),
+            sender="bot",
+            content=caption or "[photo]",
+            content_type="photo",
+        )
+    return sent_message
+
+
+async def send_logged_private_text(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    text: str,
+    reply_markup=None,
+):
+    sent_message = await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=reply_markup,
+    )
+    log_private_chat_event(
+        context,
+        chat_id=chat_id,
+        sender="bot",
+        content=text,
+        content_type="text",
+    )
+    return sent_message
 
 
 def get_private_claim_status_store(context: ContextTypes.DEFAULT_TYPE) -> dict:
@@ -601,6 +844,179 @@ def format_private_claim_status_message(status_data: dict) -> str:
     )
 
 
+def build_admin_dashboard_menu(logs_store: dict, page: int = 0) -> InlineKeyboardMarkup:
+    items = sorted(
+        (item for item in logs_store.values() if isinstance(item, dict)),
+        key=lambda item: int(item.get("updated_at", 0) or 0),
+        reverse=True,
+    )
+    total_pages = max(1, (len(items) + ADMIN_DASHBOARD_CHAT_PAGE_SIZE - 1) // ADMIN_DASHBOARD_CHAT_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start_index = page * ADMIN_DASHBOARD_CHAT_PAGE_SIZE
+    page_items = items[start_index:start_index + ADMIN_DASHBOARD_CHAT_PAGE_SIZE]
+
+    keyboard = []
+    for item in page_items:
+        chat_id = int(item.get("chat_id", 0) or 0)
+        label = build_private_actor_label(
+            user=type(
+                "DashboardUser",
+                (),
+                {
+                    "first_name": item.get("first_name", ""),
+                    "last_name": item.get("last_name", ""),
+                    "username": item.get("username", ""),
+                },
+            )(),
+            chat_id=chat_id,
+        )
+        keyboard.append([
+            InlineKeyboardButton(
+                truncate_text(label, 28),
+                callback_data=f"admin_dash_chat:{chat_id}:0:{page}",
+            )
+        ])
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("Prev", callback_data=f"admin_dash_home:{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next", callback_data=f"admin_dash_home:{page + 1}"))
+    if nav_row:
+        keyboard.append(nav_row)
+
+    return InlineKeyboardMarkup(keyboard or [[InlineKeyboardButton("Refresh", callback_data="admin_dash_home:0")]])
+
+
+def format_admin_dashboard_text(logs_store: dict, page: int = 0) -> str:
+    items = sorted(
+        (item for item in logs_store.values() if isinstance(item, dict)),
+        key=lambda item: int(item.get("updated_at", 0) or 0),
+        reverse=True,
+    )
+    total_pages = max(1, (len(items) + ADMIN_DASHBOARD_CHAT_PAGE_SIZE - 1) // ADMIN_DASHBOARD_CHAT_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start_index = page * ADMIN_DASHBOARD_CHAT_PAGE_SIZE
+    page_items = items[start_index:start_index + ADMIN_DASHBOARD_CHAT_PAGE_SIZE]
+
+    lines = [
+        "Dashboard Admin",
+        "",
+        f"Total chat private terekam: {len(items)}",
+        f"Halaman: {page + 1}/{total_pages}",
+        "",
+    ]
+
+    if not page_items:
+        lines.append("Belum ada chat private member yang terekam.")
+        return "\n".join(lines)
+
+    for index, item in enumerate(page_items, start=start_index + 1):
+        chat_id = int(item.get("chat_id", 0) or 0)
+        label = build_private_actor_label(
+            user=type(
+                "DashboardUser",
+                (),
+                {
+                    "first_name": item.get("first_name", ""),
+                    "last_name": item.get("last_name", ""),
+                    "username": item.get("username", ""),
+                },
+            )(),
+            chat_id=chat_id,
+        )
+        entries = item.get("entries")
+        entry_count = len(entries) if isinstance(entries, list) else 0
+        last_preview = str(item.get("last_message_preview", "")).strip() or "-"
+        lines.append(f"{index}. {label}")
+        lines.append(f"Chat ID: {chat_id} | Entries: {entry_count} | Update: {format_timestamp(item.get('updated_at'))}")
+        lines.append(f"Preview: {truncate_text(last_preview, 70)}")
+        lines.append("")
+
+    lines.append("Klik tombol member untuk lihat percakapannya.")
+    return "\n".join(lines).strip()
+
+
+def build_admin_chat_log_menu(chat_id: int, page: int, total_entries: int, back_page: int) -> InlineKeyboardMarkup:
+    total_pages = max(1, (total_entries + ADMIN_DASHBOARD_ENTRY_PAGE_SIZE - 1) // ADMIN_DASHBOARD_ENTRY_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+
+    nav_row = [InlineKeyboardButton("Back", callback_data=f"admin_dash_home:{back_page}")]
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("Prev", callback_data=f"admin_dash_chat:{chat_id}:{page - 1}:{back_page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next", callback_data=f"admin_dash_chat:{chat_id}:{page + 1}:{back_page}"))
+    return InlineKeyboardMarkup([nav_row])
+
+
+def format_admin_chat_log_text(chat_log: dict, page: int = 0) -> str:
+    chat_id = int(chat_log.get("chat_id", 0) or 0)
+    label = build_private_actor_label(
+        user=type(
+            "DashboardUser",
+            (),
+            {
+                "first_name": chat_log.get("first_name", ""),
+                "last_name": chat_log.get("last_name", ""),
+                "username": chat_log.get("username", ""),
+            },
+        )(),
+        chat_id=chat_id,
+    )
+    entries = chat_log.get("entries")
+    if not isinstance(entries, list):
+        entries = []
+
+    total_pages = max(1, (len(entries) + ADMIN_DASHBOARD_ENTRY_PAGE_SIZE - 1) // ADMIN_DASHBOARD_ENTRY_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start_index = max(0, len(entries) - (page + 1) * ADMIN_DASHBOARD_ENTRY_PAGE_SIZE)
+    end_index = len(entries) - page * ADMIN_DASHBOARD_ENTRY_PAGE_SIZE
+    page_entries = entries[start_index:end_index]
+
+    lines = [
+        f"Chat Member: {label}",
+        f"Chat ID: {chat_id}",
+        f"Total entry: {len(entries)} | Halaman: {page + 1}/{total_pages}",
+        f"Update terakhir: {format_timestamp(chat_log.get('updated_at'))}",
+        "",
+    ]
+
+    if not page_entries:
+        lines.append("Belum ada entry percakapan.")
+        return "\n".join(lines)
+
+    for entry in page_entries:
+        sender = "Member" if entry.get("sender") == "member" else "Bot"
+        content_type = str(entry.get("type", "text")).strip() or "text"
+        content = truncate_text(str(entry.get("text", "")).strip() or "-", 140)
+        lines.append(f"[{format_timestamp(entry.get('at'))}] {sender} ({content_type})")
+        lines.append(content)
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+async def show_admin_dashboard(target_message, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
+    logs_store = get_private_chat_logs_store(context)
+    await reply_logged_text(
+        target_message,
+        context,
+        format_admin_dashboard_text(logs_store, page),
+        reply_markup=build_admin_dashboard_menu(logs_store, page),
+    )
+
+
+async def admin_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.effective_chat or update.effective_chat.type != "private":
+        return
+
+    if not is_dashboard_identity(update.effective_user, update.effective_chat):
+        await reply_logged_text(update.message, context, "Perintah ini hanya bisa dipakai admin atau owner dashboard.")
+        return
+
+    await show_admin_dashboard(update.message, context)
+
+
 async def handle_private_general_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_chat:
         return False
@@ -614,14 +1030,18 @@ async def handle_private_general_text(update: Update, context: ContextTypes.DEFA
     validated_user_id = str(context.user_data.get("validated_user_id", "")).strip() or str(current_status.get("member_user_id", "")).strip()
 
     if remember_private_message_activity(context, text):
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Pesan yang sama sudah saya terima.\n"
             "Kalau mau lanjut, kirim User ID, kirim screenshot hasil Lucky Spin, atau ketik status klaim."
         )
         return True
 
     if extract_reward_amount_from_text(lowered) and not validated_user_id:
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Sebelum klaim hadiah, saya perlu User ID kamu dulu.\n"
             "Ketik kode akses atau langsung kirim User ID kamu."
         )
@@ -630,17 +1050,21 @@ async def handle_private_general_text(update: Update, context: ContextTypes.DEFA
     intent = detect_private_intent(text)
     if not intent:
         if current_status.get("status") == CLAIM_STATUS_AWAITING_ADMIN:
-            await update.message.reply_text(format_private_claim_status_message(current_status))
+            await reply_logged_text(update.message, context, format_private_claim_status_message(current_status))
             return True
 
         if validated_user_id:
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 "Kalau kamu sudah spin, kirim screenshot hasil Lucky Spin di chat ini.\n"
                 "Kalau lupa screenshot, tulis hadiah yang kamu dapat seperti 5000 atau 10000."
             )
             return True
 
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Saya bantu untuk flow Lucky Spin di private chat.\n\n"
             "Kirim User ID kamu untuk ambil kode akses, atau ketik panduan kalau mau lihat langkah mainnya."
         )
@@ -655,15 +1079,17 @@ async def handle_private_general_text(update: Update, context: ContextTypes.DEFA
         return True
 
     if intent == "login":
-        await update.message.reply_text("Login: https://www.horeg22.net/login")
+        await reply_logged_text(update.message, context, "Login: https://www.horeg22.net/login")
         return True
 
     if intent == "register":
-        await update.message.reply_text("Daftar: https://www.horeg22.net/register")
+        await reply_logged_text(update.message, context, "Daftar: https://www.horeg22.net/register")
         return True
 
     if intent == "spin_link":
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Buka halaman Lucky Spin di sini:\nhttps://lckyspn.netlify.app/",
             reply_markup=build_private_menu(),
         )
@@ -671,24 +1097,30 @@ async def handle_private_general_text(update: Update, context: ContextTypes.DEFA
 
     if intent == "claim_ready":
         if not validated_user_id:
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 "Sebelum klaim hadiah, ambil kode akses dulu ya.\n"
                 "Kirim User ID kamu atau ketik kode akses."
             )
             return True
 
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Kalau hasil spin kamu sudah keluar, kirim screenshot hasilnya di chat ini.\n"
             "Kalau lupa screenshot, tulis nominal hadiahnya saja biar saya bantu cek proses."
         )
         return True
 
     if intent == "status_claim":
-        await update.message.reply_text(format_private_claim_status_message(current_status))
+        await reply_logged_text(update.message, context, format_private_claim_status_message(current_status))
         return True
 
     if intent == "contact_admin":
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Kalau ada kendala yang belum selesai, kamu bisa hubungi admin @horeg222.\n"
             "Kalau masalahnya soal kode akses, kirim juga User ID kamu di chat ini biar saya bantu cek alurnya dulu."
         )
@@ -696,10 +1128,12 @@ async def handle_private_general_text(update: Update, context: ContextTypes.DEFA
 
     if intent == "follow_up":
         if current_status.get("status") == CLAIM_STATUS_AWAITING_ADMIN:
-            await update.message.reply_text(format_private_claim_status_message(current_status))
+            await reply_logged_text(update.message, context, format_private_claim_status_message(current_status))
             return True
 
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Kalau klaim kamu belum sempat saya teruskan, kirim screenshot hasil spin atau tulis nominal hadiahnya.\n"
             "Kalau masalahnya bukan itu, hubungi admin @horeg222."
         )
@@ -707,20 +1141,26 @@ async def handle_private_general_text(update: Update, context: ContextTypes.DEFA
 
     if intent == "help":
         if current_status.get("status") == CLAIM_STATUS_AWAITING_ADMIN:
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 f"{format_private_claim_status_message(current_status)}\n\n"
                 "Kalau perlu, kamu juga bisa kirim status klaim untuk cek ulang."
             )
             return True
 
         if validated_user_id:
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 "Flow kamu sudah masuk tahap setelah ambil kode.\n"
                 "Sekarang buka Lucky Spin, lalu kirim screenshot hasilnya atau tulis nominal hadiahnya kalau lupa screenshot."
             )
             return True
 
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Saya bantu flow Lucky Spin di private chat.\n"
             "Kirim User ID untuk ambil kode akses, ketik panduan untuk lihat langkah main, atau ketik login/daftar untuk link akun."
         )
@@ -810,6 +1250,19 @@ async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_chat and update.effective_chat.type == "private" and update.effective_user and not is_dashboard_identity(update.effective_user, update.effective_chat):
+        start_payload = "/start"
+        if context.args:
+            start_payload = f"/start {' '.join(context.args)}"
+        log_private_chat_event(
+            context,
+            chat_id=update.effective_chat.id,
+            user=update.effective_user,
+            sender="member",
+            content=start_payload,
+            content_type="command",
+        )
+
     args = context.args or []
     if args and args[0] == "getkode":
         await begin_private_get_code_flow(update, context)
@@ -817,7 +1270,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if update.effective_chat and update.effective_chat.type == "private":
         reset_user_state(context)
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Halo, saya Taro Admin.\n\n"
             "Kirim User ID kamu untuk ambil kode akses Lucky Spin.\n"
             "Contoh User ID: User1234"
@@ -843,7 +1298,9 @@ async def begin_private_get_code_flow(update: Update, context: ContextTypes.DEFA
 
     reset_user_state(context)
     context.user_data["step"] = STEP_PRIVATE_GET_CODE_USER_ID
-    await update.message.reply_text(
+    await reply_logged_text(
+        update.message,
+        context,
         "Di bantu berikan User ID-nya ya bosku.\n"
         "Contoh User ID: User1234"
     )
@@ -872,7 +1329,9 @@ async def show_guide(target_message, context: ContextTypes.DEFAULT_TYPE) -> None
 
     if target_message.chat.type == "private" and GUIDE_IMAGE_FILE.exists():
         with GUIDE_IMAGE_FILE.open("rb") as photo:
-            await target_message.reply_photo(
+            await reply_logged_photo(
+                target_message,
+                context,
                 photo=photo,
                 caption=guide_text,
                 reply_markup=build_private_menu(),
@@ -1018,7 +1477,9 @@ async def handle_private_reward_text(update: Update, context: ContextTypes.DEFAU
         "nggak sempet ss",
     )
     if any(pattern in lowered for pattern in forgot_patterns):
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Jika kamu lupa screenshot, maka bonus lucky spin hangus ya!!\n\n"
             "Kamu mendapatkan hadiah berapa ya ?"
         )
@@ -1035,7 +1496,9 @@ async def handle_private_reward_text(update: Update, context: ContextTypes.DEFAU
             )
         except Exception as exc:
             print(f"Gagal mengirim notifikasi klaim teks ke admin: {exc}")
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 "Hadiah kamu belum bisa saya teruskan ke admin. Coba kirim lagi nominal hadiahnya beberapa saat lagi."
             )
             return True
@@ -1048,7 +1511,9 @@ async def handle_private_reward_text(update: Update, context: ContextTypes.DEFAU
             reward_amount=reward_amount,
             source="text",
         )
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Untuk Selanjutnya nanti kamu jangan lupa Screenshot hasil lucky spin nya ya !\n"
             "Hadiah kamu saya bantu proseskan, mohon di tunggu !!",
             reply_markup=build_reward_claim_menu(),
@@ -1056,7 +1521,9 @@ async def handle_private_reward_text(update: Update, context: ContextTypes.DEFAU
         return True
 
     if any(keyword in lowered for keyword in ("hadiah", "bonus", "spin", "ss", "screenshot", "screenshoot")):
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Kalau hasil Lucky Spin kamu sudah keluar, kirim screenshot-nya di chat ini ya.\n"
             "Kalau kamu lupa screenshot, kasih tahu hadiah yang kamu dapat biar saya cek bantu proses."
         )
@@ -1085,7 +1552,7 @@ async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_
         return False
 
     if not update.message.reply_to_message:
-        await update.message.reply_text("Balas pesan klaim admin dengan teks Done.")
+        await reply_logged_text(update.message, context, "Balas pesan klaim admin dengan teks Done.")
         return True
 
     pending_claims = get_pending_admin_claims_store(context)
@@ -1095,20 +1562,20 @@ async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_
         claim_key = reply_key
 
     if not claim_key:
-        await update.message.reply_text("Pesan klaim tidak ditemukan. Balas langsung pesan klaim yang benar dengan teks Done.")
+        await reply_logged_text(update.message, context, "Pesan klaim tidak ditemukan. Balas langsung pesan klaim yang benar dengan teks Done.")
         return True
 
     claim_data = pending_claims.pop(claim_key, None)
     save_pending_admin_claims(pending_claims)
     if not isinstance(claim_data, dict):
-        await update.message.reply_text("Pesan klaim tidak ditemukan atau sudah diproses.")
+        await reply_logged_text(update.message, context, "Pesan klaim tidak ditemukan atau sudah diproses.")
         return True
 
     member_chat_id = claim_data.get("member_chat_id")
     member_user_id = str(claim_data.get("member_user_id", "")).strip() or "member"
     reward_amount = str(claim_data.get("reward_amount", "")).strip()
     if not member_chat_id:
-        await update.message.reply_text("Data member untuk klaim ini tidak valid.")
+        await reply_logged_text(update.message, context, "Data member untuk klaim ini tidak valid.")
         return True
 
     update_private_claim_status(
@@ -1118,12 +1585,13 @@ async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_
         member_user_id=member_user_id,
         reward_amount=reward_amount,
     )
-    await context.bot.send_message(
+    await send_logged_private_text(
+        context,
         chat_id=member_chat_id,
         text=f"Hadiah Lucky Spin {member_user_id} kamu telah di proseskan ya!!",
         reply_markup=build_reward_claim_menu(),
     )
-    await update.message.reply_text("Konfirmasi ke member berhasil dikirim.")
+    await reply_logged_text(update.message, context, "Konfirmasi ke member berhasil dikirim.")
     return True
 
 
@@ -1177,6 +1645,44 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await query.answer()
 
+    if query.data and query.data.startswith("admin_dash_"):
+        if not is_dashboard_identity(query.from_user, query.message.chat if query.message else None):
+            return
+
+        if query.data.startswith("admin_dash_home:"):
+            _, page_raw = query.data.split(":", 1)
+            page = int(page_raw or 0)
+            logs_store = get_private_chat_logs_store(context)
+            await query.edit_message_text(
+                text=format_admin_dashboard_text(logs_store, page),
+                reply_markup=build_admin_dashboard_menu(logs_store, page),
+            )
+            return
+
+        if query.data.startswith("admin_dash_chat:"):
+            _, chat_id_raw, page_raw, back_page_raw = query.data.split(":")
+            chat_id = int(chat_id_raw)
+            page = int(page_raw or 0)
+            back_page = int(back_page_raw or 0)
+            logs_store = get_private_chat_logs_store(context)
+            chat_log = logs_store.get(str(chat_id))
+            if not isinstance(chat_log, dict):
+                await query.edit_message_text(
+                    text="Chat log tidak ditemukan atau sudah dibersihkan.",
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("Back", callback_data=f"admin_dash_home:{back_page}")]]
+                    ),
+                )
+                return
+
+            entries = chat_log.get("entries")
+            total_entries = len(entries) if isinstance(entries, list) else 0
+            await query.edit_message_text(
+                text=format_admin_chat_log_text(chat_log, page),
+                reply_markup=build_admin_chat_log_menu(chat_id, page, total_entries, back_page),
+            )
+            return
+
     if query.data == "claim_spin":
         await begin_claim_flow(query.message, context)
         return
@@ -1212,6 +1718,16 @@ async def handle_private_spin_screenshot(update: Update, context: ContextTypes.D
     if not update.effective_chat or update.effective_chat.type != "private":
         return
 
+    if update.effective_user and not is_dashboard_identity(update.effective_user, update.effective_chat):
+        log_private_chat_event(
+            context,
+            chat_id=update.effective_chat.id,
+            user=update.effective_user,
+            sender="member",
+            content=update.message.caption or "[photo]",
+            content_type="photo",
+        )
+
     try:
         photo = update.message.photo[-1]
         photo_file = await photo.get_file()
@@ -1219,13 +1735,17 @@ async def handle_private_spin_screenshot(update: Update, context: ContextTypes.D
         result = detect_spin_result_from_image(image_bytes=image_bytes)
     except RuntimeError as exc:
         print(f"Gagal membaca screenshot Lucky Spin: {exc}")
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Pemeriksaan screenshot Lucky Spin belum siap di server. Pastikan OCR lokal sudah terpasang, lalu coba lagi."
         )
         return
     except Exception as exc:
         print(f"Error tak terduga saat membaca screenshot Lucky Spin: {exc}")
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Screenshot belum bisa diproses. Coba kirim ulang gambar yang jelas."
         )
         return
@@ -1246,7 +1766,9 @@ async def handle_private_spin_screenshot(update: Update, context: ContextTypes.D
             )
         except Exception as exc:
             print(f"Gagal mengirim notifikasi klaim ke admin: {exc}")
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 "Klaim hadiah belum bisa diteruskan ke admin. Coba lagi beberapa saat."
             )
             return
@@ -1260,7 +1782,9 @@ async def handle_private_spin_screenshot(update: Update, context: ContextTypes.D
             source="screenshot",
         )
 
-    await update.message.reply_text(
+    await reply_logged_text(
+        update.message,
+        context,
         get_spin_result_reply(result),
         reply_markup=build_reward_claim_menu() if get_reward_amount_label(result) else build_private_menu(),
     )
@@ -1279,7 +1803,7 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if step == STEP_PRIVATE_GET_CODE_USER_ID:
         user_id = text
         if len(user_id) < 3:
-            await update.message.reply_text("User ID minimal 3 karakter. Kirim ulang User ID yang valid.")
+            await reply_logged_text(update.message, context, "User ID minimal 3 karakter. Kirim ulang User ID yang valid.")
             return True
 
         try:
@@ -1290,7 +1814,9 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except RuntimeError as exc:
             reset_user_state(context)
             print(f"Gagal claim kode via Apps Script: {exc}")
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 "Sistem kode akses sedang bermasalah. Coba lagi beberapa saat."
             )
             return True
@@ -1307,14 +1833,18 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 CLAIM_STATUS_VALIDATED,
                 member_user_id=user_id,
             )
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 "Kode akses Lucky Spin kamu:\n\n"
                 f"`{code}`\n\n"
                 "Simpan kode akses kamu dan lanjutkan pilih menu di bawah ini untuk melanjutkan memutar Lucky Spin nya.",
                 parse_mode="Markdown",
                 reply_markup=build_private_menu(),
             )
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 "Kalau kamu sudah selesai spin, kirim screenshot hasil Lucky Spin di chat ini ya.\n"
                 "Kalau lupa screenshot, tulis nominal hadiahnya saja."
             )
@@ -1323,20 +1853,22 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         status = str(result.get("status", "")).strip().lower()
         message = str(result.get("message", "")).strip() or "Kode akses tidak bisa diproses."
         if status == "already_claimed":
-            await update.message.reply_text(message)
+            await reply_logged_text(update.message, context, message)
             return True
 
-        await update.message.reply_text(message)
+        await reply_logged_text(update.message, context, message)
         return True
 
     if step == STEP_USER_ID:
         if len(text) < 3:
-            await update.message.reply_text("User ID minimal 3 karakter. Kirim ulang User ID yang valid.")
+            await reply_logged_text(update.message, context, "User ID minimal 3 karakter. Kirim ulang User ID yang valid.")
             return True
 
         context.user_data["claim_user_id"] = text
         context.user_data["step"] = STEP_ACCESS_CODE
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Sekarang kirim Kode Akses Lucky Spin yang kamu terima di chat pribadi.\n"
             "Format huruf kecil atau besar tetap akan saya baca otomatis."
         )
@@ -1347,7 +1879,9 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_id = context.user_data.get("claim_user_id", "-")
 
         if code not in VALID_CODES:
-            await update.message.reply_text(
+            await reply_logged_text(
+                update.message,
+                context,
                 "Kode akses tidak valid.\n"
                 "Ketik /spin lalu ulangi proses klaim."
             )
@@ -1361,7 +1895,9 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if used_at:
             remaining = COOLDOWN_SECONDS - (now - int(used_at))
             if remaining > 0:
-                await update.message.reply_text(
+                await reply_logged_text(
+                    update.message,
+                    context,
                     "Kode ini masih cooldown.\n"
                     f"Coba lagi dalam {format_remaining(remaining)}."
                 )
@@ -1377,7 +1913,9 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["validated_tier"] = tier
         reset_user_state(context)
 
-        await update.message.reply_text(
+        await reply_logged_text(
+            update.message,
+            context,
             "Validasi berhasil.\n\n"
             f"User ID: {user_id}\n"
             f"Kode: {code}\n"
@@ -1391,6 +1929,16 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_chat and update.effective_chat.type == "private" and update.message and update.message.text and update.effective_user and not is_dashboard_identity(update.effective_user, update.effective_chat):
+        log_private_chat_event(
+            context,
+            chat_id=update.effective_chat.id,
+            user=update.effective_user,
+            sender="member",
+            content=update.message.text,
+            content_type="text",
+        )
+
     admin_done_handled = await handle_admin_done_reply(update, context)
     if admin_done_handled:
         return
@@ -1467,6 +2015,7 @@ def main() -> None:
 
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome))
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("dashboard", admin_dashboard))
     app.add_handler(CommandHandler("hapus", clear_group_lucky_spin_messages))
     app.add_handler(CommandHandler("spin", spin))
     app.add_handler(CallbackQueryHandler(button_handler))
