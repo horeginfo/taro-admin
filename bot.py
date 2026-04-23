@@ -33,6 +33,7 @@ except ImportError:
 
 DATA_FILE = Path("lucky_spin_usage.json")
 PENDING_ADMIN_CLAIMS_FILE = Path("pending_admin_claims.json")
+PRIVATE_CLAIM_STATUS_FILE = Path("private_claim_statuses.json")
 ENV_FILE = Path(".env")
 GUIDE_IMAGE_FILE = Path("images/panduan.jpg")
 COOLDOWN_SECONDS = 24 * 60 * 60
@@ -41,7 +42,15 @@ STEP_ACCESS_CODE = "await_access_code"
 STEP_PRIVATE_GET_CODE_USER_ID = "await_private_get_code_user_id"
 BOT_GROUP_MENU_MESSAGES_KEY = "group_menu_message_ids"
 PENDING_ADMIN_CLAIMS_KEY = "pending_admin_claims"
+BOT_PRIVATE_CLAIM_STATUS_KEY = "private_claim_statuses"
 ADMIN_USERNAME = "horeg222"
+PRIVATE_REPEAT_WINDOW_SECONDS = 20
+PRIVATE_REPEAT_THRESHOLD = 3
+PRIVATE_REPEAT_COOLDOWN_SECONDS = 20
+PRIVATE_CLAIM_STATUS_RETENTION_SECONDS = 7 * 24 * 60 * 60
+CLAIM_STATUS_VALIDATED = "validated"
+CLAIM_STATUS_AWAITING_ADMIN = "awaiting_admin"
+CLAIM_STATUS_COMPLETED = "completed"
 
 CODES_TIER_5K = {
     "VSRYF2", "6F7QX6", "F3AXDW", "S8Q4L6", "M6E83K", "HCLENZ", "HY7CAC", "9DSLFY", "ZXYBTU", "GF9GHR",
@@ -325,6 +334,42 @@ def save_pending_admin_claims(data: dict) -> None:
         json.dump(data, file, indent=2)
 
 
+def load_private_claim_statuses() -> dict:
+    if not PRIVATE_CLAIM_STATUS_FILE.exists():
+        return {}
+
+    try:
+        with PRIVATE_CLAIM_STATUS_FILE.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+            return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_private_claim_statuses(data: dict) -> None:
+    with PRIVATE_CLAIM_STATUS_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2)
+
+
+def cleanup_private_claim_statuses(data: dict, save: bool = True) -> dict:
+    if not isinstance(data, dict):
+        return {}
+
+    now = int(time.time())
+    cleaned = {}
+    for chat_id, item in data.items():
+        if not isinstance(item, dict):
+            continue
+
+        updated_at = int(item.get("updated_at", 0) or 0)
+        if updated_at and now - updated_at <= PRIVATE_CLAIM_STATUS_RETENTION_SECONDS:
+            cleaned[str(chat_id)] = item
+
+    if save and cleaned != data:
+        save_private_claim_statuses(cleaned)
+    return cleaned
+
+
 def cleanup_expired_codes(data: dict) -> dict:
     now = int(time.time())
     cleaned = {
@@ -408,6 +453,280 @@ def build_after_validation_menu() -> InlineKeyboardMarkup:
 def reset_user_state(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("step", None)
     context.user_data.pop("claim_user_id", None)
+
+
+def normalize_message_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def compact_message_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def text_matches_any(text: str, keywords: tuple[str, ...]) -> bool:
+    lowered = normalize_message_text(text)
+    compact = compact_message_text(text)
+    return any(keyword in lowered or compact_message_text(keyword) in compact for keyword in keywords)
+
+
+def get_private_claim_status_store(context: ContextTypes.DEFAULT_TYPE) -> dict:
+    store = context.bot_data.get(BOT_PRIVATE_CLAIM_STATUS_KEY)
+    if not isinstance(store, dict):
+        store = cleanup_private_claim_statuses(load_private_claim_statuses())
+        context.bot_data[BOT_PRIVATE_CLAIM_STATUS_KEY] = store
+    return store
+
+
+def get_private_claim_status(context: ContextTypes.DEFAULT_TYPE, chat_id: int | None) -> dict:
+    if not chat_id:
+        return {}
+
+    store = get_private_claim_status_store(context)
+    data = store.get(str(chat_id))
+    return data if isinstance(data, dict) else {}
+
+
+def update_private_claim_status(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int | None,
+    status: str,
+    member_user_id: str = "",
+    reward_amount: str = "",
+    source: str = "",
+) -> None:
+    if not chat_id:
+        return
+
+    store = get_private_claim_status_store(context)
+    key = str(chat_id)
+    existing = store.get(key)
+    if not isinstance(existing, dict):
+        existing = {}
+
+    if member_user_id:
+        existing["member_user_id"] = member_user_id
+    if reward_amount:
+        existing["reward_amount"] = normalize_reward_amount_text(reward_amount)
+    if source:
+        existing["source"] = source
+
+    existing["status"] = status
+    existing["updated_at"] = int(time.time())
+    store[key] = existing
+    cleaned_store = cleanup_private_claim_statuses(store, save=False)
+    context.bot_data[BOT_PRIVATE_CLAIM_STATUS_KEY] = cleaned_store
+    save_private_claim_statuses(cleaned_store)
+
+
+def remember_private_message_activity(context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    normalized = compact_message_text(text)
+    if not normalized:
+        return False
+
+    now = int(time.time())
+    history = context.user_data.get("private_message_history")
+    if not isinstance(history, list):
+        history = []
+
+    cleaned_history = [
+        item for item in history
+        if isinstance(item, dict) and now - int(item.get("at", 0)) <= PRIVATE_REPEAT_WINDOW_SECONDS
+    ]
+    cleaned_history.append({"text": normalized, "at": now})
+    context.user_data["private_message_history"] = cleaned_history[-8:]
+
+    repeat_count = sum(1 for item in cleaned_history if item.get("text") == normalized)
+    last_warning_at = int(context.user_data.get("private_repeat_warning_at", 0) or 0)
+    if repeat_count < PRIVATE_REPEAT_THRESHOLD:
+        return False
+
+    if now - last_warning_at < PRIVATE_REPEAT_COOLDOWN_SECONDS:
+        return False
+
+    context.user_data["private_repeat_warning_at"] = now
+    return True
+
+
+def detect_private_intent(text: str) -> str | None:
+    if text_matches_any(text, ("status klaim", "status claim", "status hadiah", "sudah belum", "udah belum", "diproses", "proses admin")):
+        return "status_claim"
+    if text_matches_any(text, ("ambil kode", "minta kode", "kode akses", "kode saya", "kode aces", "kode akes")):
+        return "get_code"
+    if text_matches_any(text, ("panduan", "tutorial", "cara spin", "cara main", "gimana spin", "bagaimana spin", "guide")):
+        return "guide"
+    if text_matches_any(text, ("login", "masuk akun", "link login")):
+        return "login"
+    if text_matches_any(text, ("daftar", "register", "buat akun", "link daftar")):
+        return "register"
+    if text_matches_any(text, ("link spin", "halaman spin", "buka spin", "web spin", "lucky spin")):
+        return "spin_link"
+    if text_matches_any(text, ("sudah spin", "udah spin", "mau klaim", "ingin klaim", "klaim hadiah", "saya sudah main")):
+        return "claim_ready"
+    if text_matches_any(text, ("admin", "cs", "customer service", "hubungi admin", "kontak admin")):
+        return "contact_admin"
+    if text_matches_any(text, ("belum dibalas", "lama", "nunggu", "menunggu", "kapan diproses")):
+        return "follow_up"
+    if text_matches_any(text, ("halo", "hai", "hi", "p", "menu", "bantuan", "tolong", "help")):
+        return "help"
+    return None
+
+
+def format_private_claim_status_message(status_data: dict) -> str:
+    if not isinstance(status_data, dict) or not status_data:
+        return (
+            "Saya belum melihat klaim aktif di chat ini.\n\n"
+            "Kalau kamu mau mulai, kirim User ID untuk ambil kode akses dulu."
+        )
+
+    member_user_id = str(status_data.get("member_user_id", "")).strip() or "member"
+    reward_amount = str(status_data.get("reward_amount", "")).strip()
+    status = str(status_data.get("status", "")).strip()
+
+    if status == CLAIM_STATUS_AWAITING_ADMIN:
+        reward_line = f" untuk hadiah {reward_amount}" if reward_amount else ""
+        return (
+            f"Klaim Lucky Spin kamu dengan User ID {member_user_id}{reward_line} sudah saya teruskan ke admin.\n"
+            "Status saat ini: menunggu proses admin."
+        )
+
+    if status == CLAIM_STATUS_COMPLETED:
+        reward_line = f" untuk hadiah {reward_amount}" if reward_amount else ""
+        return (
+            f"Klaim Lucky Spin kamu dengan User ID {member_user_id}{reward_line} sudah selesai diproses admin."
+        )
+
+    return (
+        f"User ID {member_user_id} sudah siap dipakai.\n"
+        "Sekarang buka Lucky Spin, lalu kirim screenshot hasilnya di chat ini."
+    )
+
+
+async def handle_private_general_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_chat:
+        return False
+
+    if update.effective_chat.type != "private":
+        return False
+
+    text = update.message.text.strip()
+    lowered = normalize_message_text(text)
+    current_status = get_private_claim_status(context, update.effective_chat.id)
+    validated_user_id = str(context.user_data.get("validated_user_id", "")).strip() or str(current_status.get("member_user_id", "")).strip()
+
+    if remember_private_message_activity(context, text):
+        await update.message.reply_text(
+            "Pesan yang sama sudah saya terima.\n"
+            "Kalau mau lanjut, kirim User ID, kirim screenshot hasil Lucky Spin, atau ketik status klaim."
+        )
+        return True
+
+    if extract_reward_amount_from_text(lowered) and not validated_user_id:
+        await update.message.reply_text(
+            "Sebelum klaim hadiah, saya perlu User ID kamu dulu.\n"
+            "Ketik kode akses atau langsung kirim User ID kamu."
+        )
+        return True
+
+    intent = detect_private_intent(text)
+    if not intent:
+        if current_status.get("status") == CLAIM_STATUS_AWAITING_ADMIN:
+            await update.message.reply_text(format_private_claim_status_message(current_status))
+            return True
+
+        if validated_user_id:
+            await update.message.reply_text(
+                "Kalau kamu sudah spin, kirim screenshot hasil Lucky Spin di chat ini.\n"
+                "Kalau lupa screenshot, tulis hadiah yang kamu dapat seperti 5000 atau 10000."
+            )
+            return True
+
+        await update.message.reply_text(
+            "Saya bantu untuk flow Lucky Spin di private chat.\n\n"
+            "Kirim User ID kamu untuk ambil kode akses, atau ketik panduan kalau mau lihat langkah mainnya."
+        )
+        return True
+
+    if intent == "get_code":
+        await begin_private_get_code_flow(update, context)
+        return True
+
+    if intent == "guide":
+        await show_guide(update.message, context)
+        return True
+
+    if intent == "login":
+        await update.message.reply_text("Login: https://www.horeg22.net/login")
+        return True
+
+    if intent == "register":
+        await update.message.reply_text("Daftar: https://www.horeg22.net/register")
+        return True
+
+    if intent == "spin_link":
+        await update.message.reply_text(
+            "Buka halaman Lucky Spin di sini:\nhttps://lckyspn.netlify.app/",
+            reply_markup=build_private_menu(),
+        )
+        return True
+
+    if intent == "claim_ready":
+        if not validated_user_id:
+            await update.message.reply_text(
+                "Sebelum klaim hadiah, ambil kode akses dulu ya.\n"
+                "Kirim User ID kamu atau ketik kode akses."
+            )
+            return True
+
+        await update.message.reply_text(
+            "Kalau hasil spin kamu sudah keluar, kirim screenshot hasilnya di chat ini.\n"
+            "Kalau lupa screenshot, tulis nominal hadiahnya saja biar saya bantu cek proses."
+        )
+        return True
+
+    if intent == "status_claim":
+        await update.message.reply_text(format_private_claim_status_message(current_status))
+        return True
+
+    if intent == "contact_admin":
+        await update.message.reply_text(
+            "Kalau ada kendala yang belum selesai, kamu bisa hubungi admin @horeg222.\n"
+            "Kalau masalahnya soal kode akses, kirim juga User ID kamu di chat ini biar saya bantu cek alurnya dulu."
+        )
+        return True
+
+    if intent == "follow_up":
+        if current_status.get("status") == CLAIM_STATUS_AWAITING_ADMIN:
+            await update.message.reply_text(format_private_claim_status_message(current_status))
+            return True
+
+        await update.message.reply_text(
+            "Kalau klaim kamu belum sempat saya teruskan, kirim screenshot hasil spin atau tulis nominal hadiahnya.\n"
+            "Kalau masalahnya bukan itu, hubungi admin @horeg222."
+        )
+        return True
+
+    if intent == "help":
+        if current_status.get("status") == CLAIM_STATUS_AWAITING_ADMIN:
+            await update.message.reply_text(
+                f"{format_private_claim_status_message(current_status)}\n\n"
+                "Kalau perlu, kamu juga bisa kirim status klaim untuk cek ulang."
+            )
+            return True
+
+        if validated_user_id:
+            await update.message.reply_text(
+                "Flow kamu sudah masuk tahap setelah ambil kode.\n"
+                "Sekarang buka Lucky Spin, lalu kirim screenshot hasilnya atau tulis nominal hadiahnya kalau lupa screenshot."
+            )
+            return True
+
+        await update.message.reply_text(
+            "Saya bantu flow Lucky Spin di private chat.\n"
+            "Kirim User ID untuk ambil kode akses, ketik panduan untuk lihat langkah main, atau ketik login/daftar untuk link akun."
+        )
+        return True
+
+    return False
 
 
 def get_group_menu_store(context: ContextTypes.DEFAULT_TYPE) -> dict:
@@ -638,6 +957,7 @@ async def notify_admin_claim(
     pending_claims[str(admin_message.message_id)] = {
         "member_chat_id": member_chat_id,
         "member_user_id": member_user_id,
+        "reward_amount": reward_amount,
     }
     save_pending_admin_claims(pending_claims)
     return True
@@ -666,6 +986,7 @@ async def notify_admin_claim_by_amount(
     pending_claims[str(admin_message.message_id)] = {
         "member_chat_id": member_chat_id,
         "member_user_id": member_user_id,
+        "reward_amount": normalized_amount,
     }
     save_pending_admin_claims(pending_claims)
     return True
@@ -689,6 +1010,8 @@ async def handle_private_reward_text(update: Update, context: ContextTypes.DEFAU
         "lupa screenshot",
         "lupa screenshoot",
         "lupa ss",
+        "gak ss",
+        "ga ss",
         "ga sempet ss",
         "gak sempet ss",
         "tidak sempat ss",
@@ -717,6 +1040,14 @@ async def handle_private_reward_text(update: Update, context: ContextTypes.DEFAU
             )
             return True
 
+        update_private_claim_status(
+            context,
+            update.effective_chat.id,
+            CLAIM_STATUS_AWAITING_ADMIN,
+            member_user_id=validated_user_id,
+            reward_amount=reward_amount,
+            source="text",
+        )
         await update.message.reply_text(
             "Untuk Selanjutnya nanti kamu jangan lupa Screenshot hasil lucky spin nya ya !\n"
             "Hadiah kamu saya bantu proseskan, mohon di tunggu !!",
@@ -775,10 +1106,18 @@ async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_
 
     member_chat_id = claim_data.get("member_chat_id")
     member_user_id = str(claim_data.get("member_user_id", "")).strip() or "member"
+    reward_amount = str(claim_data.get("reward_amount", "")).strip()
     if not member_chat_id:
         await update.message.reply_text("Data member untuk klaim ini tidak valid.")
         return True
 
+    update_private_claim_status(
+        context,
+        member_chat_id,
+        CLAIM_STATUS_COMPLETED,
+        member_user_id=member_user_id,
+        reward_amount=reward_amount,
+    )
     await context.bot.send_message(
         chat_id=member_chat_id,
         text=f"Hadiah Lucky Spin {member_user_id} kamu telah di proseskan ya!!",
@@ -912,6 +1251,15 @@ async def handle_private_spin_screenshot(update: Update, context: ContextTypes.D
             )
             return
 
+        update_private_claim_status(
+            context,
+            update.effective_chat.id,
+            CLAIM_STATUS_AWAITING_ADMIN,
+            member_user_id=member_user_id,
+            reward_amount=get_reward_amount_label(result) or "",
+            source="screenshot",
+        )
+
     await update.message.reply_text(
         get_spin_result_reply(result),
         reply_markup=build_reward_claim_menu() if get_reward_amount_label(result) else build_private_menu(),
@@ -953,12 +1301,22 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             data = result.get("data", {})
             code = str(data.get("kode", "")).strip().upper()
             context.user_data["validated_user_id"] = user_id
+            update_private_claim_status(
+                context,
+                update.effective_chat.id if update.effective_chat else None,
+                CLAIM_STATUS_VALIDATED,
+                member_user_id=user_id,
+            )
             await update.message.reply_text(
                 "Kode akses Lucky Spin kamu:\n\n"
                 f"`{code}`\n\n"
                 "Simpan kode akses kamu dan lanjutkan pilih menu di bawah ini untuk melanjutkan memutar Lucky Spin nya.",
                 parse_mode="Markdown",
                 reply_markup=build_private_menu(),
+            )
+            await update.message.reply_text(
+                "Kalau kamu sudah selesai spin, kirim screenshot hasil Lucky Spin di chat ini ya.\n"
+                "Kalau lupa screenshot, tulis nominal hadiahnya saja."
             )
             return True
 
@@ -1048,8 +1406,9 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if reward_text_handled:
             return
 
-        if "kode akses" in text:
-            await begin_private_get_code_flow(update, context)
+        private_text_handled = await handle_private_general_text(update, context)
+        if private_text_handled:
+            return
         return
 
     if not any(keyword in text for keyword in TRIGGER_KEYWORDS):
