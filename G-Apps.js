@@ -1,5 +1,7 @@
 const SHEET_NAME = "Luckyspin";
 const START_ROW = 6;
+const DAILY_LIMIT_MAX_NUMBER = 100;
+const DAILY_LIMIT_MESSAGE = "Maaf Ya Bonus Lucky Spin untuk Hari ini sudah Limit yaa !!\ninfo lebih lanjut bisa Tanya ke admin @horeg222";
 
 function doPost(e) {
   try {
@@ -40,14 +42,45 @@ function doPost(e) {
 
     const totalRows = lastRow - START_ROW + 1;
 
-    // Ambil kolom B sampai F:
-    // B = kode, C = nominal, D = user id, E = tele id, F = waktu klaim
-    const values = sheet.getRange(START_ROW, 2, totalRows, 5).getValues();
+    // Ambil kolom A sampai F:
+    // A = nomor urut, B = kode, C = nominal, D = user id, E = tele id, F = waktu klaim
+    const values = sheet.getRange(START_ROW, 1, totalRows, 6).getValues();
+    const limitedRows = values
+      .map((row, index) => ({
+        rowIndex: START_ROW + index,
+        number: normalizeNumber(row[0]),
+        kode: normalizeText(row[1]),
+        nominal: row[2],
+        existingUserId: normalizeText(row[3]),
+        existingTeleId: normalizeText(row[4]),
+        claimedAt: row[5]
+      }))
+      .filter((row) => row.number >= 1 && row.number <= DAILY_LIMIT_MAX_NUMBER);
+
+    if (limitedRows.length === 0) {
+      return jsonResponse({
+        ok: false,
+        status: "no_limited_rows",
+        message: "Data Lucky Spin nomor 1 sampai 100 belum tersedia di sheet"
+      });
+    }
+
+    const isDailyLimitReached = limitedRows.every((row) => (
+      row.existingUserId && row.existingTeleId && !isEmptyValue(row.claimedAt)
+    ));
+
+    if (isDailyLimitReached) {
+      return jsonResponse({
+        ok: false,
+        status: "daily_limit_reached",
+        message: DAILY_LIMIT_MESSAGE
+      });
+    }
 
     // 1. Cek apakah user_id atau tele_id sudah pernah klaim
-    for (let i = 0; i < values.length; i++) {
-      const existingUserId = normalizeText(values[i][2]); // kolom D
-      const existingTeleId = normalizeText(values[i][3]); // kolom E
+    for (let i = 0; i < limitedRows.length; i++) {
+      const existingUserId = limitedRows[i].existingUserId;
+      const existingTeleId = limitedRows[i].existingTeleId;
       const isSameUserId = existingUserId && existingUserId.toLowerCase() === userId.toLowerCase();
       const isSameTeleId = existingTeleId && existingTeleId === teleId;
 
@@ -61,11 +94,11 @@ function doPost(e) {
     }
 
     // 2. Cari kode pertama yang belum dipakai
-    for (let i = 0; i < values.length; i++) {
-      const rowIndex = START_ROW + i;
-      const kode = normalizeText(values[i][0]);      // kolom B
-      const nominal = values[i][1];                  // kolom C
-      const existingUserId = normalizeText(values[i][2]); // kolom D
+    for (let i = 0; i < limitedRows.length; i++) {
+      const rowIndex = limitedRows[i].rowIndex;
+      const kode = limitedRows[i].kode;
+      const nominal = limitedRows[i].nominal;
+      const existingUserId = limitedRows[i].existingUserId;
 
       if (kode && !existingUserId) {
         const now = new Date();
@@ -113,6 +146,15 @@ function doGet() {
 
 function normalizeText(value) {
   return String(value || "").trim();
+}
+
+function normalizeNumber(value) {
+  const parsed = Number(String(value || "").trim());
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function isEmptyValue(value) {
+  return value === "" || value === null || typeof value === "undefined";
 }
 
 function jsonResponse(payload) {
