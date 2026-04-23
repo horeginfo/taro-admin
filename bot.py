@@ -473,14 +473,14 @@ def build_group_menu(bot_username: str | None = None) -> InlineKeyboardMarkup:
             InlineKeyboardButton("Login", url="https://www.horeg22.net/login"),
             InlineKeyboardButton("Daftar", url="https://www.horeg22.net/register"),
         ],
-        [InlineKeyboardButton("Buka Halaman Lucky Spin", url="https://lckyspn.netlify.app/")],
+        [InlineKeyboardButton("Buka Halaman Lucky Spin", url="https://ls.aloka4d.xyz/index.html")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def build_private_menu() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("Buka Halaman Lucky Spin", url="https://lckyspn.netlify.app/")],
+        [InlineKeyboardButton("Buka Halaman Lucky Spin", url="https://ls.aloka4d.xyz/index.html")],
         [InlineKeyboardButton("Panduan Lucky Spin", callback_data="guide_spin")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -496,14 +496,14 @@ def build_reward_claim_menu() -> InlineKeyboardMarkup:
 def build_group_private_redirect_menu(bot_username: str | None = None) -> InlineKeyboardMarkup:
     private_chat_url = get_private_chat_url(bot_username, "getkode")
     keyboard = [
-        [InlineKeyboardButton("Buka Private Chat Bot", url=private_chat_url or "https://lckyspn.netlify.app/")],
+        [InlineKeyboardButton("Buka Private Chat Bot", url=private_chat_url or "https://ls.aloka4d.xyz/index.html")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def build_after_validation_menu() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("Buka Lucky Spin", url="https://lckyspn.netlify.app/")],
+        [InlineKeyboardButton("Buka Lucky Spin", url="https://ls.aloka4d.xyz/index.html")],
         [InlineKeyboardButton("Klaim Lagi", callback_data="claim_spin")],
         [InlineKeyboardButton("Panduan Klaim", callback_data="guide_spin")],
     ]
@@ -1090,7 +1090,7 @@ async def handle_private_general_text(update: Update, context: ContextTypes.DEFA
         await reply_logged_text(
             update.message,
             context,
-            "Buka halaman Lucky Spin di sini:\nhttps://lckyspn.netlify.app/",
+            "Buka halaman Lucky Spin di sini:\nhttps://ls.aloka4d.xyz/index.html",
             reply_markup=build_private_menu(),
         )
         return True
@@ -1995,7 +1995,7 @@ async def anti_spam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     text = update.message.text.lower()
     allowed_domains = (
-        "lckyspn.netlify.app",
+        "ls.aloka4d.xyz",
         "horeg22.net",
     )
     if "http" in text and not any(domain in text for domain in allowed_domains):
