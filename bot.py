@@ -1,5 +1,9 @@
+import asyncio
+import io
 import json
 import os
+import re
+import shutil
 import time
 from pathlib import Path
 from urllib import error, request
@@ -14,14 +18,30 @@ from telegram.ext import (
     filters,
 )
 
+try:
+    import pytesseract
+except ImportError:
+    pytesseract = None
+
+try:
+    from PIL import Image, ImageFilter, ImageOps
+except ImportError:
+    Image = None
+    ImageFilter = None
+    ImageOps = None
+
 
 DATA_FILE = Path("lucky_spin_usage.json")
+PENDING_ADMIN_CLAIMS_FILE = Path("pending_admin_claims.json")
 ENV_FILE = Path(".env")
 GUIDE_IMAGE_FILE = Path("images/panduan.jpg")
 COOLDOWN_SECONDS = 24 * 60 * 60
 STEP_USER_ID = "await_user_id"
 STEP_ACCESS_CODE = "await_access_code"
 STEP_PRIVATE_GET_CODE_USER_ID = "await_private_get_code_user_id"
+BOT_GROUP_MENU_MESSAGES_KEY = "group_menu_message_ids"
+PENDING_ADMIN_CLAIMS_KEY = "pending_admin_claims"
+ADMIN_USERNAME = "horeg222"
 
 CODES_TIER_5K = {
     "VSRYF2", "6F7QX6", "F3AXDW", "S8Q4L6", "M6E83K", "HCLENZ", "HY7CAC", "9DSLFY", "ZXYBTU", "GF9GHR",
@@ -82,6 +102,11 @@ TRIGGER_KEYWORDS = (
 )
 
 APPS_SCRIPT_TIMEOUT_SECONDS = 10
+SPIN_RESULT_UNKNOWN = "UNKNOWN"
+SPIN_RESULT_5K = "RP5000"
+SPIN_RESULT_10K = "RP10000"
+SPIN_RESULT_FREE_SPIN = "FREESPIN"
+SPIN_RESULT_ZONK = "ZONK"
 
 
 def load_dotenv(env_path: Path = ENV_FILE) -> None:
@@ -140,6 +165,134 @@ def claim_code_from_apps_script(user_id: str, tele_id: str) -> dict:
     return data
 
 
+def normalize_ocr_text(text: str) -> str:
+    normalized = text.upper()
+    normalized = normalized.replace("O", "0")
+    normalized = normalized.replace(",", ".")
+    normalized = re.sub(r"[^A-Z0-9.\s]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def classify_spin_result_from_text(text: str) -> str:
+    normalized = normalize_ocr_text(text)
+
+    if not normalized:
+        return SPIN_RESULT_UNKNOWN
+
+    if "FREE SPIN" in normalized or "FREESPIN" in normalized:
+        return SPIN_RESULT_FREE_SPIN
+
+    if "ZONK" in normalized:
+        return SPIN_RESULT_ZONK
+
+    patterns_10k = (
+        "RP 10.000",
+        "RP10.000",
+        "RP 10000",
+        "RP10000",
+        "10.000",
+        "10000",
+    )
+    if any(pattern in normalized for pattern in patterns_10k):
+        return SPIN_RESULT_10K
+
+    patterns_5k = (
+        "RP 5.000",
+        "RP5.000",
+        "RP 5000",
+        "RP5000",
+        "5.000",
+        "5000",
+    )
+    if any(pattern in normalized for pattern in patterns_5k):
+        return SPIN_RESULT_5K
+
+    return SPIN_RESULT_UNKNOWN
+
+
+def detect_spin_result_from_image(image_bytes: bytes) -> str:
+    if pytesseract is None or Image is None or ImageOps is None or ImageFilter is None:
+        raise RuntimeError("Library OCR lokal belum terpasang.")
+
+    tesseract_cmd = resolve_tesseract_cmd()
+    if not tesseract_cmd:
+        raise RuntimeError("Engine Tesseract belum ditemukan di server.")
+    pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            grayscale = ImageOps.grayscale(image)
+            resampling = getattr(Image, "Resampling", Image)
+            enlarged = grayscale.resize(
+                (grayscale.width * 2, grayscale.height * 2),
+                resampling.LANCZOS,
+            )
+            sharpened = enlarged.filter(ImageFilter.SHARPEN)
+            thresholded = sharpened.point(lambda value: 255 if value > 160 else 0)
+            extracted_text = pytesseract.image_to_string(thresholded, config="--psm 6")
+    except pytesseract.TesseractNotFoundError as exc:
+        raise RuntimeError("Engine Tesseract belum terpasang di server.") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Gagal memproses gambar OCR: {exc}") from exc
+
+    return classify_spin_result_from_text(extracted_text)
+
+
+def resolve_tesseract_cmd() -> str | None:
+    configured = os.getenv("TESSERACT_CMD", "").strip()
+    if configured and Path(configured).exists():
+        return configured
+
+    discovered = shutil.which("tesseract")
+    if discovered:
+        return discovered
+
+    windows_candidates = (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    )
+    for candidate in windows_candidates:
+        if Path(candidate).exists():
+            return candidate
+
+    return None
+
+
+def get_spin_result_reply(result: str) -> str:
+    if result == SPIN_RESULT_5K:
+        return (
+            "Selamat ya kamu mendapatkan Hadiah 5000 dari lucky spin\n"
+            "Silakan tunggu proses pengecekan admin.\n\n"
+            "Jika ada kendala, hubungi admin @horeg222"
+        )
+    if result == SPIN_RESULT_10K:
+        return (
+            "Selamat ya kamu mendapatkan Hadiah 10000 dari lucky spin\n"
+            "Silakan tunggu proses pengecekan admin.\n\n"
+            "Jika ada kendala, hubungi admin @horeg222"
+        )
+    if result == SPIN_RESULT_FREE_SPIN:
+        return (
+            "Hasil screenshot Lucky Spin kamu terbaca:\n"
+            "Free Spin\n\n"
+            "Kamu mendapatkan kesempatan spin ulang.\n"
+            "Silakan lanjutkan Lucky Spin kamu dan kirim lagi hasil terbarunya di chat ini."
+        )
+    if result == SPIN_RESULT_ZONK:
+        return (
+            "Hasil screenshot Lucky Spin kamu terbaca:\n"
+            "Zonk\n\n"
+            "Maaf, hasil ini belum mendapatkan hadiah yang bisa diklaim.\n"
+            "Silakan coba lagi di kesempatan berikutnya."
+        )
+    return (
+        "Screenshot hasil Lucky Spin belum bisa saya baca dengan yakin.\n\n"
+        "Pastikan gambar tidak blur, tidak terpotong, dan tulisan hadiah terlihat jelas.\n"
+        "Lalu kirim ulang screenshot hasil Lucky Spin kamu di chat ini."
+    )
+
+
 def load_usage_data() -> dict:
     if not DATA_FILE.exists():
         return {}
@@ -154,6 +307,23 @@ def load_usage_data() -> dict:
 
 def save_usage_data(data: dict) -> None:
     with DATA_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2)
+
+
+def load_pending_admin_claims() -> dict:
+    if not PENDING_ADMIN_CLAIMS_FILE.exists():
+        return {}
+
+    try:
+        with PENDING_ADMIN_CLAIMS_FILE.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+            return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_pending_admin_claims(data: dict) -> None:
+    with PENDING_ADMIN_CLAIMS_FILE.open("w", encoding="utf-8") as file:
         json.dump(data, file, indent=2)
 
 
@@ -193,10 +363,9 @@ def get_private_chat_url(bot_username: str | None, action: str = "menu") -> str 
 
 
 def build_group_menu(bot_username: str | None = None) -> InlineKeyboardMarkup:
-    private_chat_url = get_private_chat_url(bot_username, "getkode")
     keyboard = [
         [InlineKeyboardButton("Klaim Lucky Spin", callback_data="claim_spin")],
-        [InlineKeyboardButton("Ambil Kode Akses", url=private_chat_url or "https://ls.aloka4d.xyz/index.html")],
+        [InlineKeyboardButton("Ambil Kode Akses", callback_data="group_get_code")],
         [
             InlineKeyboardButton("Login", url="https://www.horeg22.net/login"),
             InlineKeyboardButton("Daftar", url="https://www.horeg22.net/register"),
@@ -210,6 +379,21 @@ def build_private_menu() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton("Buka Halaman Lucky Spin", url="https://ls.aloka4d.xyz/index.html")],
         [InlineKeyboardButton("Panduan Lucky Spin", callback_data="guide_spin")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_reward_claim_menu() -> InlineKeyboardMarkup:
+    keyboard = [
+        [InlineKeyboardButton("Cek akun Sekarang", url="https://horeg22.net/login")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_group_private_redirect_menu(bot_username: str | None = None) -> InlineKeyboardMarkup:
+    private_chat_url = get_private_chat_url(bot_username, "getkode")
+    keyboard = [
+        [InlineKeyboardButton("Buka Private Chat Bot", url=private_chat_url or "https://ls.aloka4d.xyz/index.html")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -228,6 +412,67 @@ def reset_user_state(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("claim_user_id", None)
 
 
+def get_group_menu_store(context: ContextTypes.DEFAULT_TYPE) -> dict:
+    store = context.bot_data.get(BOT_GROUP_MENU_MESSAGES_KEY)
+    if not isinstance(store, dict):
+        store = {}
+        context.bot_data[BOT_GROUP_MENU_MESSAGES_KEY] = store
+    return store
+
+
+def get_pending_admin_claims_store(context: ContextTypes.DEFAULT_TYPE | None = None) -> dict:
+    data = load_pending_admin_claims()
+    if context is not None:
+        context.bot_data[PENDING_ADMIN_CLAIMS_KEY] = data
+    return data
+
+
+def remember_group_menu_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int) -> None:
+    store = get_group_menu_store(context)
+    message_ids = store.get(chat_id)
+    if not isinstance(message_ids, list):
+        message_ids = []
+        store[chat_id] = message_ids
+    if message_id not in message_ids:
+        message_ids.append(message_id)
+
+
+def remember_group_bot_message(context: ContextTypes.DEFAULT_TYPE, message) -> None:
+    if not message or not getattr(message, "chat", None):
+        return
+
+    if message.chat.type == "private":
+        return
+
+    remember_group_menu_message(context, message.chat_id, message.message_id)
+
+
+async def send_group_reply_text(
+    target_message,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    reply_markup=None,
+    parse_mode: str | None = None,
+):
+    sent_message = await target_message.reply_text(
+        text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+    )
+    remember_group_bot_message(context, sent_message)
+    return sent_message
+
+
+async def send_group_menu_message(target_message, context: ContextTypes.DEFAULT_TYPE, text: str):
+    sent_message = await send_group_reply_text(
+        target_message,
+        context,
+        text,
+        reply_markup=build_group_menu(context.bot.username),
+    )
+    return sent_message
+
+
 def get_tier_message(tier: str) -> str:
     if tier == "tier5k":
         return "Kode valid. Tier hadiah kamu mengarah ke hadiah Rp 5.000."
@@ -244,10 +489,7 @@ async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for member in update.message.new_chat_members:
         text = f"Halo {member.first_name} Selamat Bergabung di Group Horeg22 Official, semoga nyaman yaa !! Ada Bonus Lucky Spin nih, Yuk ambil sekarang !!"
-        await update.message.reply_text(
-            text,
-            reply_markup=build_group_menu(context.bot.username),
-        )
+        await send_group_menu_message(update.message, context, text)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -275,10 +517,7 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Halo, saya Taro Admin.\n\n"
         "Pilih menu di bawah untuk ambil kode akses atau lanjut klaim Lucky Spin."
     )
-    await update.message.reply_text(
-        text,
-        reply_markup=build_group_menu(context.bot.username),
-    )
+    await send_group_menu_message(update.message, context, text)
 
 
 async def begin_private_get_code_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -295,9 +534,10 @@ async def begin_private_get_code_flow(update: Update, context: ContextTypes.DEFA
 
 async def begin_claim_flow(target_message, context: ContextTypes.DEFAULT_TYPE) -> None:
     reset_user_state(context)
-    await target_message.reply_text(
+    await send_group_menu_message(
+        target_message,
+        context,
         "Lucky Spin dapat Di klaim 1 kali dalam 1 hari, Jika kamu belum ada Klaim Lucky Spin nya langsung klik menu Ambil kode akses ya !",
-        reply_markup=build_group_menu(context.bot.username),
     )
 
 
@@ -322,10 +562,155 @@ async def show_guide(target_message, context: ContextTypes.DEFAULT_TYPE) -> None
             )
         return
 
-    await target_message.reply_text(
-        guide_text,
-        reply_markup=build_group_menu(context.bot.username),
+    await send_group_menu_message(target_message, context, guide_text)
+
+
+async def delete_message_safe(message) -> None:
+    if not message:
+        return
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+async def delete_message_after_delay(message, delay_seconds: int) -> None:
+    await asyncio.sleep(delay_seconds)
+    await delete_message_safe(message)
+
+
+def get_reward_amount_label(result: str) -> str | None:
+    if result == SPIN_RESULT_5K:
+        return "5.000"
+    if result == SPIN_RESULT_10K:
+        return "10.000"
+    return None
+
+
+async def notify_admin_claim(
+    context: ContextTypes.DEFAULT_TYPE,
+    member_chat_id: int,
+    member_user_id: str,
+    reward_result: str,
+) -> bool:
+    reward_amount = get_reward_amount_label(reward_result)
+    if not reward_amount:
+        return False
+
+    admin_target = os.getenv("ADMIN_CHAT_ID", "").strip() or f"@{os.getenv('ADMIN_USERNAME', ADMIN_USERNAME).lstrip('@')}"
+    admin_message = await context.bot.send_message(
+        chat_id=admin_target,
+        text=(
+            f"User id : {member_user_id}\n"
+            f"Klaim bonus lucky spin {reward_amount}"
+        ),
     )
+
+    pending_claims = get_pending_admin_claims_store(context)
+    pending_claims[str(admin_message.message_id)] = {
+        "member_chat_id": member_chat_id,
+        "member_user_id": member_user_id,
+    }
+    save_pending_admin_claims(pending_claims)
+    return True
+
+
+async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_chat or not update.effective_user:
+        return False
+
+    if update.effective_chat.type != "private":
+        return False
+
+    incoming_text = update.message.text.strip().lower()
+    if incoming_text != "done":
+        return False
+
+    admin_username = (update.effective_user.username or "").lower()
+    expected_admin = os.getenv("ADMIN_USERNAME", ADMIN_USERNAME).lstrip("@").lower()
+    admin_chat_id = os.getenv("ADMIN_CHAT_ID", "").strip()
+    is_admin_by_username = admin_username == expected_admin if expected_admin else False
+    is_admin_by_chat_id = admin_chat_id and str(update.effective_chat.id) == admin_chat_id
+    if not is_admin_by_username and not is_admin_by_chat_id:
+        return False
+
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Balas pesan klaim admin dengan teks Done.")
+        return True
+
+    pending_claims = get_pending_admin_claims_store(context)
+    claim_key = None
+    reply_key = str(update.message.reply_to_message.message_id)
+    if reply_key in pending_claims:
+        claim_key = reply_key
+
+    if not claim_key:
+        await update.message.reply_text("Pesan klaim tidak ditemukan. Balas langsung pesan klaim yang benar dengan teks Done.")
+        return True
+
+    claim_data = pending_claims.pop(claim_key, None)
+    save_pending_admin_claims(pending_claims)
+    if not isinstance(claim_data, dict):
+        await update.message.reply_text("Pesan klaim tidak ditemukan atau sudah diproses.")
+        return True
+
+    member_chat_id = claim_data.get("member_chat_id")
+    member_user_id = str(claim_data.get("member_user_id", "")).strip() or "member"
+    if not member_chat_id:
+        await update.message.reply_text("Data member untuk klaim ini tidak valid.")
+        return True
+
+    await context.bot.send_message(
+        chat_id=member_chat_id,
+        text=f"Hadiah Lucky Spin {member_user_id} kamu telah di proseskan ya!!",
+        reply_markup=build_reward_claim_menu(),
+    )
+    await update.message.reply_text("Konfirmasi ke member berhasil dikirim.")
+    return True
+
+
+async def clear_group_lucky_spin_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.effective_chat or not update.effective_user:
+        return
+
+    if update.effective_chat.type == "private":
+        await update.message.reply_text("Perintah ini hanya bisa dipakai di grup.")
+        return
+
+    try:
+        member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+    except Exception:
+        await send_group_reply_text(update.message, context, "Gagal cek status admin grup.")
+        return
+
+    if member.status not in {"administrator", "creator"}:
+        await send_group_reply_text(update.message, context, "Perintah /hapus hanya bisa dipakai admin grup.")
+        return
+
+    store = get_group_menu_store(context)
+    message_ids = list(store.get(update.effective_chat.id, []))
+    deleted_count = 0
+
+    for message_id in message_ids:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=message_id)
+            deleted_count += 1
+        except Exception:
+            pass
+
+    store[update.effective_chat.id] = []
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    confirmation = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"Pesan bot berhasil dihapus: {deleted_count}",
+    )
+    context.application.create_task(delete_message_after_delay(confirmation, 10))
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -339,9 +724,80 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await begin_claim_flow(query.message, context)
         return
 
+    if query.data == "group_get_code":
+        redirect_message = None
+        if query.message:
+            store = get_group_menu_store(context)
+            tracked_ids = store.get(query.message.chat_id, [])
+            if query.message.message_id in tracked_ids:
+                store[query.message.chat_id] = [mid for mid in tracked_ids if mid != query.message.message_id]
+            redirect_message = await send_group_reply_text(
+                query.message,
+                context,
+                "Lanjut ambil kode akses di private chat ya bosku.",
+                reply_markup=build_group_private_redirect_menu(context.bot.username),
+            )
+            await delete_message_safe(query.message)
+
+        if redirect_message:
+            context.application.create_task(delete_message_after_delay(redirect_message, 15))
+        return
+
     if query.data == "guide_spin":
         await show_guide(query.message, context)
         return
+
+
+async def handle_private_spin_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.photo:
+        return
+
+    if not update.effective_chat or update.effective_chat.type != "private":
+        return
+
+    try:
+        photo = update.message.photo[-1]
+        photo_file = await photo.get_file()
+        image_bytes = bytes(await photo_file.download_as_bytearray())
+        result = detect_spin_result_from_image(image_bytes=image_bytes)
+    except RuntimeError as exc:
+        print(f"Gagal membaca screenshot Lucky Spin: {exc}")
+        await update.message.reply_text(
+            "Pemeriksaan screenshot Lucky Spin belum siap di server. Pastikan OCR lokal sudah terpasang, lalu coba lagi."
+        )
+        return
+    except Exception as exc:
+        print(f"Error tak terduga saat membaca screenshot Lucky Spin: {exc}")
+        await update.message.reply_text(
+            "Screenshot belum bisa diproses. Coba kirim ulang gambar yang jelas."
+        )
+        return
+
+    stored_user_id = str(context.user_data.get("validated_user_id", "")).strip()
+    fallback_user_id = ""
+    if update.effective_user and update.effective_user.username:
+        fallback_user_id = update.effective_user.username
+    member_user_id = stored_user_id or fallback_user_id or "member"
+
+    if get_reward_amount_label(result):
+        try:
+            await notify_admin_claim(
+                context=context,
+                member_chat_id=update.effective_chat.id,
+                member_user_id=member_user_id,
+                reward_result=result,
+            )
+        except Exception as exc:
+            print(f"Gagal mengirim notifikasi klaim ke admin: {exc}")
+            await update.message.reply_text(
+                "Klaim hadiah belum bisa diteruskan ke admin. Coba lagi beberapa saat."
+            )
+            return
+
+    await update.message.reply_text(
+        get_spin_result_reply(result),
+        reply_markup=build_reward_claim_menu() if get_reward_amount_label(result) else build_private_menu(),
+    )
 
 
 async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -378,6 +834,7 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if result.get("ok"):
             data = result.get("data", {})
             code = str(data.get("kode", "")).strip().upper()
+            context.user_data["validated_user_id"] = user_id
             await update.message.reply_text(
                 "Kode akses Lucky Spin kamu:\n\n"
                 f"`{code}`\n\n"
@@ -458,6 +915,10 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_done_handled = await handle_admin_done_reply(update, context)
+    if admin_done_handled:
+        return
+
     handled = await handle_claim_input(update, context)
     if handled or not update.message or not update.message.text:
         return
@@ -466,20 +927,29 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not any(keyword in text for keyword in TRIGGER_KEYWORDS):
         return
 
+    if not update.effective_chat or update.effective_chat.type == "private":
+        return
+
     if "spin" in text or "klaim" in text:
-        await update.message.reply_text(
+        await send_group_reply_text(
+            update.message,
+            context,
             "Untuk mulai Lucky Spin, ketik /spin lalu pilih 'Ambil Kode Akses' atau 'Klaim Lucky Spin'."
         )
     elif "kode" in text:
-        await update.message.reply_text(
+        await send_group_reply_text(
+            update.message,
+            context,
             "Ketik /spin lalu tekan tombol 'Ambil Kode Akses'. Bot akan membuka chat pribadi untuk meminta User ID."
         )
     elif "login" in text:
-        await update.message.reply_text("Login: https://www.horeg22.net/login")
+        await send_group_reply_text(update.message, context, "Login: https://www.horeg22.net/login")
     elif "daftar" in text or "register" in text:
-        await update.message.reply_text("Daftar: https://www.horeg22.net/register")
+        await send_group_reply_text(update.message, context, "Daftar: https://www.horeg22.net/register")
     else:
-        await update.message.reply_text(
+        await send_group_reply_text(
+            update.message,
+            context,
             "Taro admin fokus untuk Lucky Spin. Ketik /spin untuk membuka menu klaim."
         )
 
@@ -510,8 +980,10 @@ def main() -> None:
 
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome))
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("hapus", clear_group_lucky_spin_messages))
     app.add_handler(CommandHandler("spin", spin))
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_private_spin_screenshot))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auto_reply))
     app.add_handler(MessageHandler(filters.TEXT, anti_spam))
 

@@ -44,10 +44,14 @@ function doPost(e) {
     // B = kode, C = nominal, D = user id, E = tele id, F = waktu klaim
     const values = sheet.getRange(START_ROW, 2, totalRows, 5).getValues();
 
-    // 1. Cek apakah user_id sudah pernah klaim
+    // 1. Cek apakah user_id atau tele_id sudah pernah klaim
     for (let i = 0; i < values.length; i++) {
       const existingUserId = normalizeText(values[i][2]); // kolom D
-      if (existingUserId && existingUserId.toLowerCase() === userId.toLowerCase()) {
+      const existingTeleId = normalizeText(values[i][3]); // kolom E
+      const isSameUserId = existingUserId && existingUserId.toLowerCase() === userId.toLowerCase();
+      const isSameTeleId = existingTeleId && existingTeleId === teleId;
+
+      if (isSameUserId || isSameTeleId) {
         return jsonResponse({
           ok: false,
           status: "already_claimed",

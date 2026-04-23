@@ -9,7 +9,7 @@ Bot ini dipakai untuk membantu member mengambil kode akses Lucky Spin dan diarah
 Alur utama dibagi menjadi 2 tempat:
 
 - Chat grup: bot menampilkan menu utama, menyambut member baru, dan mengarahkan member ke chat pribadi untuk ambil kode akses.
-- Chat pribadi: bot meminta `User ID`, mengecek data ke Google Sheets melalui Apps Script, lalu memberikan kode akses jika user belum klaim hari itu.
+- Chat pribadi: bot meminta `User ID`, mengecek data ke Google Sheets melalui Apps Script, lalu memberikan kode akses jika `User ID` dan `TELE ID` belum klaim hari itu.
 
 ## File Penting
 
@@ -33,10 +33,17 @@ BOT_TOKEN=token_bot_telegram
 GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/.../exec
 ```
 
+Untuk fitur baca screenshot hasil Lucky Spin di private chat, tambahkan juga:
+
+```env
+TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+```
+
 Keterangan:
 
 - `BOT_TOKEN`: token bot Telegram dari BotFather.
 - `GOOGLE_SCRIPT_URL`: URL Web App Apps Script yang berakhiran `/exec`.
+- `TESSERACT_CMD`: opsional untuk Windows jika `tesseract.exe` belum masuk PATH. Di Railway biasanya tidak perlu jika package `tesseract` sudah tersedia di image deploy.
 
 ## Alur Bot di Chat Grup
 
@@ -183,7 +190,7 @@ Payload yang dikirim:
 }
 ```
 
-### 3. Jika User ID Belum Pernah Klaim
+### 3. Jika User ID dan Tele ID Belum Pernah Klaim
 
 Jika Apps Script mengembalikan status sukses, bot membalas:
 
@@ -220,6 +227,17 @@ Saat diklik di private chat, bot:
 - menambahkan caption panduan
 - menampilkan menu private lagi
 
+### 5. Screenshot Hasil Lucky Spin di Private Chat
+
+Jika user mengirim screenshot hasil Lucky Spin ke bot di private chat, bot akan:
+
+1. mengambil foto dari Telegram
+2. menjalankan OCR lokal dengan `pytesseract`
+3. mencoba membaca hasil hadiah seperti `Rp 5.000`, `Rp 10.000`, `Free Spin`, atau `Zonk`
+4. membalas sesuai hasil yang terbaca
+
+Jika screenshot buram, terpotong, atau OCR belum siap di server, bot akan meminta user kirim ulang atau memberi tahu bahwa OCR belum siap.
+
 Teks panduan yang dipakai:
 
 ```text
@@ -233,15 +251,15 @@ Panduan klaim Lucky Spin:
 7. Selamat mencoba semoga beruntung ya!! .
 ```
 
-### 5. Jika User Sudah Pernah Klaim
+### 6. Jika User Sudah Pernah Klaim
 
-Jika `User ID` sudah ada di Google Sheet kolom klaim, maka Apps Script akan menolak request dan bot membalas pesan penolakan, misalnya:
+Jika `User ID` sudah ada di Google Sheet kolom klaim, atau `TELE ID` yang dipakai sudah pernah tercatat klaim, maka Apps Script akan menolak request dan bot membalas pesan penolakan yang sama, misalnya:
 
 ```text
 Lucky spin dapat di klaim 1 kali dalam 1 hari , info selanjutnya bisa Hub admin @horeg222
 ```
 
-### 6. Jika Apps Script Bermasalah
+### 7. Jika Apps Script Bermasalah
 
 Jika request ke Apps Script gagal atau response tidak valid, bot membalas:
 
@@ -258,7 +276,7 @@ Alur integrasi:
 1. user kirim `User ID` di private chat
 2. `bot.py` mengirim request ke `GOOGLE_SCRIPT_URL`
 3. Apps Script memeriksa Google Sheet
-4. jika `User ID` belum ada, Apps Script mengambil kode kosong dari sheet
+4. jika `User ID` dan `TELE ID` belum ada, Apps Script mengambil kode kosong dari sheet
 5. Apps Script mengisi kolom klaim di sheet
 6. Apps Script mengembalikan kode ke bot
 7. bot mengirim kode ke user
@@ -356,6 +374,7 @@ Project ini sudah disiapkan untuk deploy ke Railway dengan file berikut:
 Konfigurasi deploy yang dipakai:
 
 - Railway akan install dependency dari `requirements.txt`
+- Railway akan membaca [nixpacks.toml](c:/Users/Bot-telegram/nixpacks.toml) untuk menambahkan package sistem `tesseract`
 - Railway akan menjalankan bot dengan command:
 
 ```text
@@ -384,6 +403,52 @@ GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/.../exec
 
 - Railway Free memberi credit terbatas, jadi cocok untuk mulai dan testing.
 - Bot ini memakai `run_polling()`, jadi Railway harus menjalankan proses terus menerus.
+
+## Setup OCR Lokal
+
+Supaya fitur screenshot Lucky Spin bisa bekerja baik di private chat, environment perlu 2 lapis dependency:
+
+1. Python package:
+   - `pillow`
+   - `pytesseract`
+2. System package:
+   - `Tesseract OCR`
+
+### Windows Lokal
+
+1. Install package Python:
+
+```powershell
+venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+2. Install Tesseract OCR:
+
+```powershell
+winget install --id=tesseract-ocr.tesseract -e
+```
+
+3. Jika perlu, isi `.env`:
+
+```env
+TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+```
+
+4. Jalankan bot:
+
+```powershell
+venv\Scripts\python.exe bot.py
+```
+
+### Railway
+
+Untuk Railway, package Python akan diambil dari `requirements.txt`, dan engine OCR akan dipasang lewat [nixpacks.toml](c:/Users/Bot-telegram/nixpacks.toml). Setelah file berubah:
+
+1. push perubahan repo
+2. lakukan redeploy service di Railway
+3. cek log startup bot
+
+Jika deploy berhasil, bot akan bisa membaca screenshot hasil Lucky Spin di private chat tanpa perlu `OPENAI_API_KEY`.
 - File lokal seperti `lucky_spin_usage.json` di Railway tidak cocok dijadikan penyimpanan permanen, karena filesystem deploy bisa berubah saat restart atau redeploy.
 - Flow utama bot kamu sekarang aman karena pembagian kode akses memakai Google Apps Script dan Google Sheets, bukan file lokal.
 
