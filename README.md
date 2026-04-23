@@ -25,6 +25,8 @@ Alur utama dibagi menjadi 2 tempat:
   File lama dari sistem assignment lokal. Saat ini tidak lagi dipakai oleh flow ambil kode dari Google Sheets.
 - [pending_admin_claims.json](c:/Users/Bot-telegram/pending_admin_claims.json)
   Menyimpan daftar klaim hadiah yang sudah diteruskan ke admin dan menunggu balasan `Done`.
+- [private_claim_statuses.json](c:/Users/Bot-telegram/private_claim_statuses.json)
+  Menyimpan status klaim private per member agar status `validated`, `awaiting_admin`, dan `completed` tetap ada walau bot restart.
 
 ## Konfigurasi Environment
 
@@ -219,22 +221,54 @@ Menu private saat ini berisi:
 Mengarah ke:
 
 ```text
-https://ls.aloka4d.xyz/index.html
+https://lckyspn.netlify.app/
 ```
 
 #### `Panduan Lucky Spin`
 
 Saat diklik di private chat, bot:
 
-- mengirim gambar dari file `image/panduan.jpg` jika file tersedia
+- mengirim gambar dari file `images/panduan.jpg` jika file tersedia
 - menambahkan caption panduan
 - menampilkan menu private lagi
 
-### 5. Klaim Hadiah di Private Chat
+### 5. Respon Cerdas di Private Chat
 
 Setelah user lolos validasi dan sudah mendapatkan kode akses, bot menyimpan `validated_user_id` di session private chat.
 
-Sesudah itu, ada 2 jalur klaim yang bisa dipakai user:
+Setelah itu, bot private sekarang tidak hanya menunggu screenshot atau nominal hadiah, tetapi juga membaca maksud chat member dan memberi respons sesuai konteks session.
+
+Intent yang sekarang dikenali antara lain:
+
+- `ambil kode`, `minta kode`, `kode akses`, `kode saya`
+- `panduan`, `tutorial`, `cara spin`, `cara main`, `gimana spin`
+- `login`, `link login`
+- `daftar`, `register`, `link daftar`
+- `link spin`, `halaman spin`, `buka spin`
+- `sudah spin`, `mau klaim`, `klaim hadiah`
+- `status klaim`, `sudah belum`, `diproses`, `proses admin`
+- `admin`, `hubungi admin`, `cs`
+- sapaan umum seperti `halo`, `menu`, `help`, `tolong`
+
+Bot juga dibuat lebih toleran terhadap typo ringan seperti `kode aces`, `kode akes`, atau variasi penulisan member yang tidak rapi.
+
+Logika session-aware yang sekarang dipakai:
+
+- jika member belum pernah validasi `User ID`, bot akan mengarahkan ke flow ambil kode
+- jika member sudah dapat kode, bot akan mengarahkan untuk buka Lucky Spin dan kirim hasil spin
+- jika klaim sudah diteruskan ke admin, bot bisa menjawab status klaim
+- jika admin sudah menandai klaim selesai, bot akan menyimpan status selesai untuk chat member itu
+
+Bot juga punya anti-spam ringan khusus private chat:
+
+- jika member mengirim pesan yang sama berulang kali dalam waktu singkat, bot hanya mengirim satu balasan pengarah
+- tujuannya supaya chat tidak loop dan member tetap diarahkan ke langkah berikutnya
+
+Selain itu, setelah kode akses berhasil diberikan, bot sekarang langsung mengirim follow-up tambahan agar member tahu bahwa langkah berikutnya adalah kirim screenshot hasil spin atau nominal hadiah jika lupa screenshot.
+
+### 6. Klaim Hadiah di Private Chat
+
+Sesudah validasi berhasil, ada 2 jalur klaim yang bisa dipakai user:
 
 #### A. Klaim lewat screenshot
 
@@ -250,7 +284,7 @@ Jika screenshot buram, terpotong, atau OCR belum siap di server, bot akan memint
 
 #### B. Klaim lewat teks
 
-Bot sekarang juga bisa merespons pesan teks user di private chat setelah proses validasi selesai.
+Bot juga bisa merespons pesan teks user di private chat setelah proses validasi selesai.
 
 Contoh:
 
@@ -273,6 +307,15 @@ Lalu bot langsung meneruskan klaim ke admin dengan format yang sama seperti flow
 
 - Jika user mengirim teks umum yang masih berkaitan dengan `hadiah`, `bonus`, `spin`, `ss`, `screenshot`, atau `screenshoot`, bot akan mengarahkan user untuk kirim screenshot atau menyebut nominal hadiah.
 
+- Jika user menanyakan `status klaim`, `sudah belum`, `diproses`, atau mengeluh menunggu lama, bot akan membaca status session private chat dan memberi balasan sesuai kondisi:
+  - belum ada klaim aktif
+  - klaim sudah diteruskan ke admin
+  - klaim sudah selesai diproses admin
+
+- Jika user langsung mengirim nominal hadiah tetapi bot belum punya `User ID` tervalidasi pada session itu, bot akan mengarahkan user untuk ambil kode atau kirim `User ID` dulu.
+
+- Jika user menanyakan admin atau bantuan lanjutan, bot akan memberi arahan ke `@horeg222` sambil tetap mencoba mengarahkan flow yang masih bisa ditangani bot.
+
 Teks panduan yang dipakai:
 
 ```text
@@ -286,7 +329,7 @@ Panduan klaim Lucky Spin:
 7. Selamat mencoba semoga beruntung ya!! .
 ```
 
-### 6. Jika User Sudah Pernah Klaim
+### 7. Jika User Sudah Pernah Klaim
 
 Jika `User ID` sudah ada di Google Sheet kolom klaim, atau `TELE ID` yang dipakai sudah pernah tercatat klaim, maka Apps Script akan menolak request dan bot membalas pesan penolakan yang sama, misalnya:
 
@@ -294,7 +337,7 @@ Jika `User ID` sudah ada di Google Sheet kolom klaim, atau `TELE ID` yang dipaka
 Lucky spin dapat di klaim 1 kali dalam 1 hari , info selanjutnya bisa Hub admin @horeg222
 ```
 
-### 7. Jika Apps Script Bermasalah
+### 8. Jika Apps Script Bermasalah
 
 Jika request ke Apps Script gagal atau response tidak valid, bot membalas:
 
@@ -343,10 +386,25 @@ Selain state di atas, bot juga menyimpan data session private chat berikut:
 
 - `validated_user_id`
   User ID yang sudah lolos validasi dan dipakai saat meneruskan klaim hadiah ke admin.
+- `private_message_history`
+  Riwayat singkat pesan private untuk anti-spam pesan berulang.
 - `validated_code`
   Kode akses yang sudah lolos validasi lokal.
 - `validated_tier`
   Tier kode hasil validasi lokal.
+
+Selain `context.user_data`, bot juga memakai `context.bot_data` untuk menyimpan status klaim private per chat pada key `private_claim_statuses`.
+Data ini di-load dari file `private_claim_statuses.json` saat store pertama kali dipakai, lalu disimpan ulang setiap ada perubahan status.
+Bot juga membersihkan otomatis status yang tidak diperbarui lebih dari 7 hari agar file penyimpanan tetap kecil.
+
+Status yang dipakai:
+
+- `validated`
+  Member sudah lolos validasi `User ID` dan siap spin.
+- `awaiting_admin`
+  Klaim hadiah sudah dikirim ke admin dan sedang menunggu proses.
+- `completed`
+  Admin sudah membalas `Done` dan member sudah dikonfirmasi.
 
 Catatan:
 
@@ -362,6 +420,11 @@ Masih dipakai untuk menyimpan timestamp penggunaan kode pada flow validasi lokal
 ### `lucky_spin_assignments.json`
 
 Ini adalah file dari sistem assignment lokal lama. Saat ini flow ambil kode via Google Sheets tidak lagi bergantung pada file ini.
+
+### `private_claim_statuses.json`
+
+Dipakai untuk menyimpan status klaim private yang aktif maupun yang sudah selesai, sehingga member masih bisa cek `status klaim` meskipun bot baru saja restart.
+Status yang `updated_at`-nya lebih lama dari 7 hari akan dibersihkan otomatis saat data di-load atau saat ada update status baru.
 
 ## Handler Utama di bot.py
 
@@ -379,6 +442,8 @@ Beberapa handler utama:
   Menangani input percakapan berbasis state.
 - `handle_private_spin_screenshot`
   Membaca screenshot hasil Lucky Spin di private chat dan menjalankan OCR.
+- `handle_private_general_text`
+  Menangani intent chat bebas di private chat seperti panduan, login, status klaim, bantuan, dan follow-up member.
 - `notify_admin_claim`
   Meneruskan klaim hadiah hasil OCR ke admin.
 - `auto_reply`
