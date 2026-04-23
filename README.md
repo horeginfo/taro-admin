@@ -4,12 +4,12 @@ Dokumen ini menjelaskan alur kerja bot Telegram pada project ini, termasuk peril
 
 ## Ringkasan Fungsi Bot
 
-Bot ini dipakai untuk membantu member mengambil kode akses Lucky Spin dan diarahkan ke halaman spin.
+Bot ini dipakai untuk membantu member mengambil kode akses Lucky Spin, masuk ke halaman spin, lalu mengajukan klaim hadiah lewat private chat.
 
 Alur utama dibagi menjadi 2 tempat:
 
 - Chat grup: bot menampilkan menu utama, menyambut member baru, dan mengarahkan member ke chat pribadi untuk ambil kode akses.
-- Chat pribadi: bot meminta `User ID`, mengecek data ke Google Sheets melalui Apps Script, lalu memberikan kode akses jika `User ID` dan `TELE ID` belum klaim hari itu.
+- Chat pribadi: bot meminta `User ID`, mengecek data ke Google Sheets melalui Apps Script, lalu memberikan kode akses jika `User ID` dan `TELE ID` belum klaim hari itu. Setelah spin selesai, bot juga bisa membaca screenshot hasil spin atau menanggapi teks user terkait hadiah lalu meneruskan klaim ke admin.
 
 ## File Penting
 
@@ -23,6 +23,8 @@ Alur utama dibagi menjadi 2 tempat:
   Penyimpanan lokal cooldown kode untuk validasi lokal yang masih tersisa di bot.
 - [lucky_spin_assignments.json](c:/Users/Bot-telegram/lucky_spin_assignments.json)
   File lama dari sistem assignment lokal. Saat ini tidak lagi dipakai oleh flow ambil kode dari Google Sheets.
+- [pending_admin_claims.json](c:/Users/Bot-telegram/pending_admin_claims.json)
+  Menyimpan daftar klaim hadiah yang sudah diteruskan ke admin dan menunggu balasan `Done`.
 
 ## Konfigurasi Environment
 
@@ -150,7 +152,8 @@ Bot mencoba menghapus pesan yang mengandung link selain domain berikut:
 Jika user masuk ke bot lewat:
 
 - tombol `Ambil Kode Akses` dari grup, atau
-- mengetik `/start` di private chat,
+- mengetik `/start` di private chat, atau
+- mengirim teks `kode akses` di private chat,
 
 maka bot akan masuk ke flow pengambilan kode.
 
@@ -227,16 +230,48 @@ Saat diklik di private chat, bot:
 - menambahkan caption panduan
 - menampilkan menu private lagi
 
-### 5. Screenshot Hasil Lucky Spin di Private Chat
+### 5. Klaim Hadiah di Private Chat
+
+Setelah user lolos validasi dan sudah mendapatkan kode akses, bot menyimpan `validated_user_id` di session private chat.
+
+Sesudah itu, ada 2 jalur klaim yang bisa dipakai user:
+
+#### A. Klaim lewat screenshot
 
 Jika user mengirim screenshot hasil Lucky Spin ke bot di private chat, bot akan:
 
 1. mengambil foto dari Telegram
 2. menjalankan OCR lokal dengan `pytesseract`
 3. mencoba membaca hasil hadiah seperti `Rp 5.000`, `Rp 10.000`, `Free Spin`, atau `Zonk`
-4. membalas sesuai hasil yang terbaca
+4. jika hasilnya `5.000` atau `10.000`, bot langsung meneruskan klaim ke admin
+5. membalas sesuai hasil yang terbaca
 
 Jika screenshot buram, terpotong, atau OCR belum siap di server, bot akan meminta user kirim ulang atau memberi tahu bahwa OCR belum siap.
+
+#### B. Klaim lewat teks
+
+Bot sekarang juga bisa merespons pesan teks user di private chat setelah proses validasi selesai.
+
+Contoh:
+
+- Jika user mengirim teks seperti `lupa screenshot`, `lupa screenshoot`, atau `lupa ss`, bot membalas:
+
+```text
+Jika kamu lupa screenshot, maka bonus lucky spin hangus ya!!
+
+Kamu mendapatkan hadiah berapa ya ?
+```
+
+- Jika user lalu mengirim nominal hadiah seperti `5000`, `5.000`, `5,000`, `10000`, `10.000`, `10,000`, atau nominal angka lain yang terbaca jelas, bot membalas:
+
+```text
+Untuk Selanjutnya nanti kamu jangan lupa Screenshot hasil lucky spin nya ya !
+Hadiah kamu saya bantu proseskan, mohon di tunggu !!
+```
+
+Lalu bot langsung meneruskan klaim ke admin dengan format yang sama seperti flow screenshot.
+
+- Jika user mengirim teks umum yang masih berkaitan dengan `hadiah`, `bonus`, `spin`, `ss`, `screenshot`, atau `screenshoot`, bot akan mengarahkan user untuk kirim screenshot atau menyebut nominal hadiah.
 
 Teks panduan yang dipakai:
 
@@ -304,6 +339,15 @@ State yang dipakai:
 - `STEP_ACCESS_CODE`
   State lama untuk input kode akses di grup.
 
+Selain state di atas, bot juga menyimpan data session private chat berikut:
+
+- `validated_user_id`
+  User ID yang sudah lolos validasi dan dipakai saat meneruskan klaim hadiah ke admin.
+- `validated_code`
+  Kode akses yang sudah lolos validasi lokal.
+- `validated_tier`
+  Tier kode hasil validasi lokal.
+
 Catatan:
 
 - Flow klaim aktif sekarang lebih fokus ke private chat untuk ambil kode.
@@ -333,8 +377,12 @@ Beberapa handler utama:
   Menangani klik tombol inline.
 - `handle_claim_input`
   Menangani input percakapan berbasis state.
+- `handle_private_spin_screenshot`
+  Membaca screenshot hasil Lucky Spin di private chat dan menjalankan OCR.
+- `notify_admin_claim`
+  Meneruskan klaim hadiah hasil OCR ke admin.
 - `auto_reply`
-  Menangani auto reply untuk pesan teks biasa.
+  Menangani auto reply di grup dan private chat, termasuk trigger `kode akses` dan percakapan teks hadiah.
 - `anti_spam`
   Menghapus link yang tidak diizinkan.
 
@@ -350,6 +398,8 @@ Beberapa handler utama:
 6. bot cek ke Apps Script
 7. jika lolos, bot mengirim kode akses
 8. user klik `Buka Halaman Lucky Spin`
+9. setelah spin, user bisa kirim screenshot hasil atau teks hadiah di private chat
+10. jika hadiah valid, bot meneruskan klaim ke admin
 
 ### Alur Tombol Klaim di Grup
 
@@ -357,10 +407,21 @@ Beberapa handler utama:
 2. bot memberi pesan arahan bahwa klaim hanya 1 kali sehari
 3. bot meminta user untuk klik `Ambil Kode Akses`
 
+### Alur Klaim Hadiah ke Admin
+
+1. user sudah validasi `User ID` dan menerima kode akses
+2. user menyelesaikan spin
+3. user kirim screenshot hasil spin atau menyebut nominal hadiah di private chat
+4. bot membaca hasil hadiah
+5. jika hadiah bernilai klaim, bot mengirim pesan ke admin `@horeg222`
+6. admin membalas pesan klaim dengan teks `Done`
+7. bot mengirim konfirmasi ke member bahwa hadiah sudah diproses
+
 ## Catatan Teknis
 
 - Jika `GOOGLE_SCRIPT_URL` salah atau Apps Script belum di-deploy sebagai Web App, flow private chat tidak akan berhasil.
 - Jika file `images/panduan.jpg` tidak ada, panduan private chat tidak akan mengirim gambar.
+- Jika OCR lokal belum siap, klaim via screenshot tidak akan terbaca, tetapi user masih bisa menyebut nominal hadiah lewat teks di private chat.
 - Token bot Telegram di `.env` harus dijaga. Jika pernah terekspos, segera regenerate lewat BotFather.
 
 ## Deploy 24 Jam di Railway
