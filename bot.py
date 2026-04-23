@@ -274,20 +274,18 @@ def get_spin_result_reply(result: str) -> str:
         )
     if result == SPIN_RESULT_FREE_SPIN:
         return (
-            "Hasil screenshot Lucky Spin kamu terbaca:\n"
             "Free Spin\n\n"
             "Kamu mendapatkan kesempatan spin ulang.\n"
             "Silakan lanjutkan Lucky Spin kamu dan kirim lagi hasil terbarunya di chat ini."
         )
     if result == SPIN_RESULT_ZONK:
         return (
-            "Hasil screenshot Lucky Spin kamu terbaca:\n"
             "Zonk\n\n"
             "Maaf, hasil ini belum mendapatkan hadiah yang bisa diklaim.\n"
             "Silakan coba lagi di kesempatan berikutnya."
         )
     return (
-        "Screenshot hasil Lucky Spin belum bisa saya baca dengan yakin.\n\n"
+        "Berikan Screenshot dari Hasil Lucky Spin yang kamu dapatkan.\n\n"
         "Pastikan gambar tidak blur, tidak terpotong, dan tulisan hadiah terlihat jelas.\n"
         "Lalu kirim ulang screenshot hasil Lucky Spin kamu di chat ini."
     )
@@ -370,14 +368,14 @@ def build_group_menu(bot_username: str | None = None) -> InlineKeyboardMarkup:
             InlineKeyboardButton("Login", url="https://www.horeg22.net/login"),
             InlineKeyboardButton("Daftar", url="https://www.horeg22.net/register"),
         ],
-        [InlineKeyboardButton("Buka Halaman Lucky Spin", url="https://ls.aloka4d.xyz/index.html")],
+        [InlineKeyboardButton("Buka Halaman Lucky Spin", url="https://lckyspn.netlify.app/")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def build_private_menu() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("Buka Halaman Lucky Spin", url="https://ls.aloka4d.xyz/index.html")],
+        [InlineKeyboardButton("Buka Halaman Lucky Spin", url="https://lckyspn.netlify.app/")],
         [InlineKeyboardButton("Panduan Lucky Spin", callback_data="guide_spin")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -393,14 +391,14 @@ def build_reward_claim_menu() -> InlineKeyboardMarkup:
 def build_group_private_redirect_menu(bot_username: str | None = None) -> InlineKeyboardMarkup:
     private_chat_url = get_private_chat_url(bot_username, "getkode")
     keyboard = [
-        [InlineKeyboardButton("Buka Private Chat Bot", url=private_chat_url or "https://ls.aloka4d.xyz/index.html")],
+        [InlineKeyboardButton("Buka Private Chat Bot", url=private_chat_url or "https://lckyspn.netlify.app/")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def build_after_validation_menu() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("Buka Lucky Spin", url="https://ls.aloka4d.xyz/index.html")],
+        [InlineKeyboardButton("Buka Lucky Spin", url="https://lckyspn.netlify.app/")],
         [InlineKeyboardButton("Klaim Lagi", callback_data="claim_spin")],
         [InlineKeyboardButton("Panduan Klaim", callback_data="guide_spin")],
     ]
@@ -588,6 +586,35 @@ def get_reward_amount_label(result: str) -> str | None:
     return None
 
 
+def normalize_reward_amount_text(raw_amount: str) -> str:
+    digits = re.sub(r"\D", "", raw_amount)
+    if not digits:
+        return raw_amount.strip()
+
+    reversed_digits = digits[::-1]
+    grouped = [reversed_digits[index:index + 3] for index in range(0, len(reversed_digits), 3)]
+    return ".".join(part[::-1] for part in grouped[::-1])
+
+
+def extract_reward_amount_from_text(text: str) -> str | None:
+    lowered = text.lower()
+    compact = lowered.replace(" ", "")
+
+    known_amount_patterns = (
+        ("10.000", ("10000", "10.000", "10,000")),
+        ("5.000", ("5000", "5.000", "5,000")),
+    )
+    for normalized, patterns in known_amount_patterns:
+        if any(pattern in compact for pattern in patterns):
+            return normalized
+
+    amount_match = re.search(r"(?:rp\s*)?(\d{4,9}(?:[.,]\d{3})*)", lowered)
+    if amount_match:
+        return normalize_reward_amount_text(amount_match.group(1))
+
+    return None
+
+
 async def notify_admin_claim(
     context: ContextTypes.DEFAULT_TYPE,
     member_chat_id: int,
@@ -614,6 +641,97 @@ async def notify_admin_claim(
     }
     save_pending_admin_claims(pending_claims)
     return True
+
+
+async def notify_admin_claim_by_amount(
+    context: ContextTypes.DEFAULT_TYPE,
+    member_chat_id: int,
+    member_user_id: str,
+    reward_amount: str,
+) -> bool:
+    normalized_amount = normalize_reward_amount_text(reward_amount)
+    if not normalized_amount:
+        return False
+
+    admin_target = os.getenv("ADMIN_CHAT_ID", "").strip() or f"@{os.getenv('ADMIN_USERNAME', ADMIN_USERNAME).lstrip('@')}"
+    admin_message = await context.bot.send_message(
+        chat_id=admin_target,
+        text=(
+            f"User id : {member_user_id}\n"
+            f"Klaim bonus lucky spin {normalized_amount}"
+        ),
+    )
+
+    pending_claims = get_pending_admin_claims_store(context)
+    pending_claims[str(admin_message.message_id)] = {
+        "member_chat_id": member_chat_id,
+        "member_user_id": member_user_id,
+    }
+    save_pending_admin_claims(pending_claims)
+    return True
+
+
+async def handle_private_reward_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_chat:
+        return False
+
+    if update.effective_chat.type != "private":
+        return False
+
+    validated_user_id = str(context.user_data.get("validated_user_id", "")).strip()
+    if not validated_user_id:
+        return False
+
+    text = update.message.text.strip()
+    lowered = text.lower()
+
+    forgot_patterns = (
+        "lupa screenshot",
+        "lupa screenshoot",
+        "lupa ss",
+        "ga sempet ss",
+        "gak sempet ss",
+        "tidak sempat ss",
+        "nggak sempet ss",
+    )
+    if any(pattern in lowered for pattern in forgot_patterns):
+        await update.message.reply_text(
+            "Jika kamu lupa screenshot, maka bonus lucky spin hangus ya!!\n\n"
+            "Kamu mendapatkan hadiah berapa ya ?"
+        )
+        return True
+
+    reward_amount = extract_reward_amount_from_text(lowered)
+    if reward_amount:
+        try:
+            await notify_admin_claim_by_amount(
+                context=context,
+                member_chat_id=update.effective_chat.id,
+                member_user_id=validated_user_id,
+                reward_amount=reward_amount,
+            )
+        except Exception as exc:
+            print(f"Gagal mengirim notifikasi klaim teks ke admin: {exc}")
+            await update.message.reply_text(
+                "Hadiah kamu belum bisa saya teruskan ke admin. Coba kirim lagi nominal hadiahnya beberapa saat lagi."
+            )
+            return True
+
+        await update.message.reply_text(
+            "Untuk Selanjutnya nanti kamu jangan lupa Screenshot hasil lucky spin nya ya !\n"
+            "Hadiah kamu saya bantu proseskan, mohon di tunggu !!",
+            reply_markup=build_reward_claim_menu(),
+        )
+        return True
+
+    if any(keyword in lowered for keyword in ("hadiah", "bonus", "spin", "ss", "screenshot", "screenshoot")):
+        await update.message.reply_text(
+            "Kalau hasil Lucky Spin kamu sudah keluar, kirim screenshot-nya di chat ini ya.\n"
+            "Kalau kamu lupa screenshot, kasih tahu hadiah yang kamu dapat biar saya cek bantu proses."
+        )
+        return True
+
+    return False
 
 
 async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -924,10 +1042,20 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     text = update.message.text.lower()
+
+    if update.effective_chat and update.effective_chat.type == "private":
+        reward_text_handled = await handle_private_reward_text(update, context)
+        if reward_text_handled:
+            return
+
+        if "kode akses" in text:
+            await begin_private_get_code_flow(update, context)
+        return
+
     if not any(keyword in text for keyword in TRIGGER_KEYWORDS):
         return
 
-    if not update.effective_chat or update.effective_chat.type == "private":
+    if not update.effective_chat:
         return
 
     if "spin" in text or "klaim" in text:
@@ -960,7 +1088,7 @@ async def anti_spam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     text = update.message.text.lower()
     allowed_domains = (
-        "ls.aloka4d.xyz",
+        "lckyspn.netlify.app",
         "horeg22.net",
     )
     if "http" in text and not any(domain in text for domain in allowed_domains):
