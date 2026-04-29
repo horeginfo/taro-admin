@@ -4,12 +4,12 @@ Dokumen ini menjelaskan alur kerja bot Telegram pada project ini, termasuk peril
 
 ## Ringkasan Fungsi Bot
 
-Bot ini dipakai untuk membantu member mengambil kode akses Lucky Spin dan diarahkan ke halaman spin.
+Bot ini dipakai untuk membantu member mengambil kode akses Lucky Spin, masuk ke halaman spin, lalu mengajukan klaim hadiah lewat private chat.
 
 Alur utama dibagi menjadi 2 tempat:
 
 - Chat grup: bot menampilkan menu utama, menyambut member baru, dan mengarahkan member ke chat pribadi untuk ambil kode akses.
-- Chat pribadi: bot meminta `User ID`, mengecek data ke Google Sheets melalui Apps Script, lalu memberikan kode akses jika `User ID` dan `TELE ID` belum klaim hari itu.
+- Chat pribadi: bot meminta `User ID`, mengecek data ke Google Sheets melalui Apps Script, lalu memberikan kode akses jika `User ID` dan `TELE ID` belum klaim hari itu. Setelah spin selesai, bot juga bisa membaca screenshot hasil spin atau menanggapi teks user terkait hadiah lalu meneruskan klaim ke admin.
 
 ## File Penting
 
@@ -23,6 +23,12 @@ Alur utama dibagi menjadi 2 tempat:
   Penyimpanan lokal cooldown kode untuk validasi lokal yang masih tersisa di bot.
 - [lucky_spin_assignments.json](c:/Users/Bot-telegram/lucky_spin_assignments.json)
   File lama dari sistem assignment lokal. Saat ini tidak lagi dipakai oleh flow ambil kode dari Google Sheets.
+- [pending_admin_claims.json](c:/Users/Bot-telegram/pending_admin_claims.json)
+  Menyimpan daftar klaim hadiah yang sudah diteruskan ke admin dan menunggu balasan `Done`.
+- [private_claim_statuses.json](c:/Users/Bot-telegram/private_claim_statuses.json)
+  Menyimpan status klaim private per member agar status `validated`, `awaiting_admin`, dan `completed` tetap ada walau bot restart.
+- [private_chat_logs.json](c:/Users/Bot-telegram/private_chat_logs.json)
+  Menyimpan log percakapan private member dan balasan bot untuk kebutuhan dashboard admin.
 
 ## Konfigurasi Environment
 
@@ -44,6 +50,24 @@ Keterangan:
 - `BOT_TOKEN`: token bot Telegram dari BotFather.
 - `GOOGLE_SCRIPT_URL`: URL Web App Apps Script yang berakhiran `/exec`.
 - `TESSERACT_CMD`: opsional untuk Windows jika `tesseract.exe` belum masuk PATH. Di Railway biasanya tidak perlu jika package `tesseract` sudah tersedia di image deploy.
+
+Dashboard admin membaca identitas admin dari:
+
+- `ADMIN_USERNAME`
+- `ADMIN_CHAT_ID`
+- `DASHBOARD_HOST`
+- `DASHBOARD_PORT`
+- `DASHBOARD_PUBLIC_URL`
+- `DASHBOARD_TOKEN`
+
+Jika `ADMIN_CHAT_ID` belum diisi, bot tetap bisa mengenali admin dari username sesuai `ADMIN_USERNAME`.
+
+Untuk dashboard web terpisah:
+
+- `DASHBOARD_HOST`: default `0.0.0.0`
+- `DASHBOARD_PORT`: default `8080` atau mengikuti `PORT`
+- `DASHBOARD_PUBLIC_URL`: URL publik yang akan dibagikan ke admin, misalnya `https://dashboard.domainkamu.com`
+- `DASHBOARD_TOKEN`: token akses dashboard web. Sangat disarankan diisi kalau dashboard dibuka ke internet.
 
 ## Alur Bot di Chat Grup
 
@@ -114,7 +138,7 @@ https://www.horeg22.net/register
 Mengarah ke:
 
 ```text
-https://ls.aloka4d.xyz/index.html
+https://lckyspn.netlify.app/
 ```
 
 ### 4. Respon Keyword di Grup
@@ -140,8 +164,40 @@ Respon umumnya:
 
 Bot mencoba menghapus pesan yang mengandung link selain domain berikut:
 
-- `ls.aloka4d.xyz`
+- `lckyspn.netlify.app`
 - `horeg22.net`
+
+## Dashboard Admin
+
+Bot sekarang punya dashboard internal yang hanya bisa diakses admin lewat private chat bot.
+
+Command:
+
+```text
+/dashboard
+```
+
+Command dashboard web:
+
+```text
+/dashboardweb
+```
+
+Fungsi dashboard:
+
+- melihat daftar chat private member yang terekam
+- melihat update terakhir tiap member
+- membuka detail percakapan per member lewat tombol inline
+- melihat pesan masuk member dan balasan bot pada flow private chat
+- mencari log berdasarkan `chat_id`, `username`, `user_id`, nama member, dan potongan isi chat
+- export log ke file `JSON` atau `CSV`
+
+Keamanan akses:
+
+- hanya akun yang cocok dengan `ADMIN_USERNAME` atau `ADMIN_CHAT_ID` yang bisa membuka dashboard
+- akun owner `@trustno_one9` juga bisa membuka dashboard
+- chat admin tidak disimpan sebagai chat member di file log
+- jika `DASHBOARD_TOKEN` diisi, dashboard web hanya bisa dibuka dengan token tersebut
 
 ## Alur Bot di Chat Pribadi
 
@@ -150,7 +206,8 @@ Bot mencoba menghapus pesan yang mengandung link selain domain berikut:
 Jika user masuk ke bot lewat:
 
 - tombol `Ambil Kode Akses` dari grup, atau
-- mengetik `/start` di private chat,
+- mengetik `/start` di private chat, atau
+- mengirim teks `kode akses` di private chat,
 
 maka bot akan masuk ke flow pengambilan kode.
 
@@ -216,27 +273,100 @@ Menu private saat ini berisi:
 Mengarah ke:
 
 ```text
-https://ls.aloka4d.xyz/index.html
+https://lckyspn.netlify.app/
 ```
 
 #### `Panduan Lucky Spin`
 
 Saat diklik di private chat, bot:
 
-- mengirim gambar dari file `image/panduan.jpg` jika file tersedia
+- mengirim gambar dari file `images/panduan.jpg` jika file tersedia
 - menambahkan caption panduan
 - menampilkan menu private lagi
 
-### 5. Screenshot Hasil Lucky Spin di Private Chat
+### 5. Respon Cerdas di Private Chat
+
+Setelah user lolos validasi dan sudah mendapatkan kode akses, bot menyimpan `validated_user_id` di session private chat.
+
+Setelah itu, bot private sekarang tidak hanya menunggu screenshot atau nominal hadiah, tetapi juga membaca maksud chat member dan memberi respons sesuai konteks session.
+
+Intent yang sekarang dikenali antara lain:
+
+- `ambil kode`, `minta kode`, `kode akses`, `kode saya`
+- `panduan`, `tutorial`, `cara spin`, `cara main`, `gimana spin`
+- `login`, `link login`
+- `daftar`, `register`, `link daftar`
+- `link spin`, `halaman spin`, `buka spin`
+- `sudah spin`, `mau klaim`, `klaim hadiah`
+- `status klaim`, `sudah belum`, `diproses`, `proses admin`
+- `admin`, `hubungi admin`, `cs`
+- sapaan umum seperti `halo`, `menu`, `help`, `tolong`
+
+Bot juga dibuat lebih toleran terhadap typo ringan seperti `kode aces`, `kode akes`, atau variasi penulisan member yang tidak rapi.
+
+Logika session-aware yang sekarang dipakai:
+
+- jika member belum pernah validasi `User ID`, bot akan mengarahkan ke flow ambil kode
+- jika member sudah dapat kode, bot akan mengarahkan untuk buka Lucky Spin dan kirim hasil spin
+- jika klaim sudah diteruskan ke admin, bot bisa menjawab status klaim
+- jika admin sudah menandai klaim selesai, bot akan menyimpan status selesai untuk chat member itu
+
+Bot juga punya anti-spam ringan khusus private chat:
+
+- jika member mengirim pesan yang sama berulang kali dalam waktu singkat, bot hanya mengirim satu balasan pengarah
+- tujuannya supaya chat tidak loop dan member tetap diarahkan ke langkah berikutnya
+
+Selain itu, setelah kode akses berhasil diberikan, bot sekarang langsung mengirim follow-up tambahan agar member tahu bahwa langkah berikutnya adalah kirim screenshot hasil spin atau nominal hadiah jika lupa screenshot.
+
+### 6. Klaim Hadiah di Private Chat
+
+Sesudah validasi berhasil, ada 2 jalur klaim yang bisa dipakai user:
+
+#### A. Klaim lewat screenshot
 
 Jika user mengirim screenshot hasil Lucky Spin ke bot di private chat, bot akan:
 
 1. mengambil foto dari Telegram
 2. menjalankan OCR lokal dengan `pytesseract`
 3. mencoba membaca hasil hadiah seperti `Rp 5.000`, `Rp 10.000`, `Free Spin`, atau `Zonk`
-4. membalas sesuai hasil yang terbaca
+4. jika hasilnya `5.000` atau `10.000`, bot langsung meneruskan klaim ke admin
+5. membalas sesuai hasil yang terbaca
 
 Jika screenshot buram, terpotong, atau OCR belum siap di server, bot akan meminta user kirim ulang atau memberi tahu bahwa OCR belum siap.
+
+#### B. Klaim lewat teks
+
+Bot juga bisa merespons pesan teks user di private chat setelah proses validasi selesai.
+
+Contoh:
+
+- Jika user mengirim teks seperti `lupa screenshot`, `lupa screenshoot`, atau `lupa ss`, bot membalas:
+
+```text
+Jika kamu lupa screenshot, maka bonus lucky spin hangus ya!!
+
+Kamu mendapatkan hadiah berapa ya ?
+```
+
+- Jika user lalu mengirim nominal hadiah seperti `5000`, `5.000`, `5,000`, `10000`, `10.000`, `10,000`, atau nominal angka lain yang terbaca jelas, bot membalas:
+
+```text
+Untuk Selanjutnya nanti kamu jangan lupa Screenshot hasil lucky spin nya ya !
+Hadiah kamu saya bantu proseskan, mohon di tunggu !!
+```
+
+Lalu bot langsung meneruskan klaim ke admin dengan format yang sama seperti flow screenshot.
+
+- Jika user mengirim teks umum yang masih berkaitan dengan `hadiah`, `bonus`, `spin`, `ss`, `screenshot`, atau `screenshoot`, bot akan mengarahkan user untuk kirim screenshot atau menyebut nominal hadiah.
+
+- Jika user menanyakan `status klaim`, `sudah belum`, `diproses`, atau mengeluh menunggu lama, bot akan membaca status session private chat dan memberi balasan sesuai kondisi:
+  - belum ada klaim aktif
+  - klaim sudah diteruskan ke admin
+  - klaim sudah selesai diproses admin
+
+- Jika user langsung mengirim nominal hadiah tetapi bot belum punya `User ID` tervalidasi pada session itu, bot akan mengarahkan user untuk ambil kode atau kirim `User ID` dulu.
+
+- Jika user menanyakan admin atau bantuan lanjutan, bot akan memberi arahan ke `@horeg222` sambil tetap mencoba mengarahkan flow yang masih bisa ditangani bot.
 
 Teks panduan yang dipakai:
 
@@ -251,7 +381,7 @@ Panduan klaim Lucky Spin:
 7. Selamat mencoba semoga beruntung ya!! .
 ```
 
-### 6. Jika User Sudah Pernah Klaim
+### 7. Jika User Sudah Pernah Klaim
 
 Jika `User ID` sudah ada di Google Sheet kolom klaim, atau `TELE ID` yang dipakai sudah pernah tercatat klaim, maka Apps Script akan menolak request dan bot membalas pesan penolakan yang sama, misalnya:
 
@@ -259,7 +389,7 @@ Jika `User ID` sudah ada di Google Sheet kolom klaim, atau `TELE ID` yang dipaka
 Lucky spin dapat di klaim 1 kali dalam 1 hari , info selanjutnya bisa Hub admin @horeg222
 ```
 
-### 7. Jika Apps Script Bermasalah
+### 8. Jika Apps Script Bermasalah
 
 Jika request ke Apps Script gagal atau response tidak valid, bot membalas:
 
@@ -304,6 +434,30 @@ State yang dipakai:
 - `STEP_ACCESS_CODE`
   State lama untuk input kode akses di grup.
 
+Selain state di atas, bot juga menyimpan data session private chat berikut:
+
+- `validated_user_id`
+  User ID yang sudah lolos validasi dan dipakai saat meneruskan klaim hadiah ke admin.
+- `private_message_history`
+  Riwayat singkat pesan private untuk anti-spam pesan berulang.
+- `validated_code`
+  Kode akses yang sudah lolos validasi lokal.
+- `validated_tier`
+  Tier kode hasil validasi lokal.
+
+Selain `context.user_data`, bot juga memakai `context.bot_data` untuk menyimpan status klaim private per chat pada key `private_claim_statuses`.
+Data ini di-load dari file `private_claim_statuses.json` saat store pertama kali dipakai, lalu disimpan ulang setiap ada perubahan status.
+Bot juga membersihkan otomatis status yang tidak diperbarui lebih dari 7 hari agar file penyimpanan tetap kecil.
+
+Status yang dipakai:
+
+- `validated`
+  Member sudah lolos validasi `User ID` dan siap spin.
+- `awaiting_admin`
+  Klaim hadiah sudah dikirim ke admin dan sedang menunggu proses.
+- `completed`
+  Admin sudah membalas `Done` dan member sudah dikonfirmasi.
+
 Catatan:
 
 - Flow klaim aktif sekarang lebih fokus ke private chat untuk ambil kode.
@@ -319,6 +473,17 @@ Masih dipakai untuk menyimpan timestamp penggunaan kode pada flow validasi lokal
 
 Ini adalah file dari sistem assignment lokal lama. Saat ini flow ambil kode via Google Sheets tidak lagi bergantung pada file ini.
 
+### `private_claim_statuses.json`
+
+Dipakai untuk menyimpan status klaim private yang aktif maupun yang sudah selesai, sehingga member masih bisa cek `status klaim` meskipun bot baru saja restart.
+Status yang `updated_at`-nya lebih lama dari 7 hari akan dibersihkan otomatis saat data di-load atau saat ada update status baru.
+
+### `private_chat_logs.json`
+
+Dipakai untuk menyimpan histori percakapan private antara member dan bot.
+Log ini dipakai oleh dashboard admin dan dibersihkan otomatis jika tidak diperbarui lebih dari 14 hari.
+Setiap chat disimpan dengan batas entry terbaru agar ukuran file tetap terkendali.
+
 ## Handler Utama di bot.py
 
 Beberapa handler utama:
@@ -333,8 +498,16 @@ Beberapa handler utama:
   Menangani klik tombol inline.
 - `handle_claim_input`
   Menangani input percakapan berbasis state.
+- `handle_private_spin_screenshot`
+  Membaca screenshot hasil Lucky Spin di private chat dan menjalankan OCR.
+- `handle_private_general_text`
+  Menangani intent chat bebas di private chat seperti panduan, login, status klaim, bantuan, dan follow-up member.
+- `admin_dashboard`
+  Menampilkan dashboard admin untuk melihat daftar chat member dan isi percakapan private.
+- `notify_admin_claim`
+  Meneruskan klaim hadiah hasil OCR ke admin.
 - `auto_reply`
-  Menangani auto reply untuk pesan teks biasa.
+  Menangani auto reply di grup dan private chat, termasuk trigger `kode akses` dan percakapan teks hadiah.
 - `anti_spam`
   Menghapus link yang tidak diizinkan.
 
@@ -350,6 +523,8 @@ Beberapa handler utama:
 6. bot cek ke Apps Script
 7. jika lolos, bot mengirim kode akses
 8. user klik `Buka Halaman Lucky Spin`
+9. setelah spin, user bisa kirim screenshot hasil atau teks hadiah di private chat
+10. jika hadiah valid, bot meneruskan klaim ke admin
 
 ### Alur Tombol Klaim di Grup
 
@@ -357,10 +532,21 @@ Beberapa handler utama:
 2. bot memberi pesan arahan bahwa klaim hanya 1 kali sehari
 3. bot meminta user untuk klik `Ambil Kode Akses`
 
+### Alur Klaim Hadiah ke Admin
+
+1. user sudah validasi `User ID` dan menerima kode akses
+2. user menyelesaikan spin
+3. user kirim screenshot hasil spin atau menyebut nominal hadiah di private chat
+4. bot membaca hasil hadiah
+5. jika hadiah bernilai klaim, bot mengirim pesan ke admin `@horeg222`
+6. admin membalas pesan klaim dengan teks `Done`
+7. bot mengirim konfirmasi ke member bahwa hadiah sudah diproses
+
 ## Catatan Teknis
 
 - Jika `GOOGLE_SCRIPT_URL` salah atau Apps Script belum di-deploy sebagai Web App, flow private chat tidak akan berhasil.
 - Jika file `images/panduan.jpg` tidak ada, panduan private chat tidak akan mengirim gambar.
+- Jika OCR lokal belum siap, klaim via screenshot tidak akan terbaca, tetapi user masih bisa menyebut nominal hadiah lewat teks di private chat.
 - Token bot Telegram di `.env` harus dijaga. Jika pernah terekspos, segera regenerate lewat BotFather.
 
 ## Deploy 24 Jam di Railway

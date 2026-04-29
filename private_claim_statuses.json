@@ -1,0 +1,30 @@
+{
+  "8796443478": {
+    "member_user_id": "member",
+    "reward_amount": "5.000",
+    "source": "screenshot",
+    "status": "awaiting_admin",
+    "updated_at": 1776976176
+  },
+  "6787636319": {
+    "member_user_id": "Bona723",
+    "status": "completed",
+    "updated_at": 1777477780,
+    "reward_amount": "5.000",
+    "source": "text"
+  },
+  "6733848496": {
+    "member_user_id": "Id:Orongos",
+    "status": "completed",
+    "updated_at": 1777478072,
+    "reward_amount": "5.000",
+    "source": "text"
+  },
+  "7317230875": {
+    "member_user_id": "Santakaskus",
+    "status": "completed",
+    "updated_at": 1777477954,
+    "reward_amount": "5.000",
+    "source": "text"
+  }
+}

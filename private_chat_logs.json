@@ -1,0 +1,456 @@
+{
+  "8796443478": {
+    "chat_id": 8796443478,
+    "entries": [
+      {
+        "at": 1776979622,
+        "sender": "member",
+        "type": "text",
+        "text": "kode akses"
+      },
+      {
+        "at": 1776979623,
+        "sender": "bot",
+        "type": "text",
+        "text": "Di bantu berikan User ID-nya ya bosku. Contoh User ID: User1234"
+      },
+      {
+        "at": 1776979651,
+        "sender": "bot",
+        "type": "text",
+        "text": "Perintah ini hanya bisa dipakai admin."
+      }
+    ],
+    "first_name": "TrustNoOne",
+    "last_name": "",
+    "username": "",
+    "user_id": 8796443478,
+    "last_message_preview": "Perintah ini hanya bisa dipakai admin.",
+    "updated_at": 1776979651
+  },
+  "6787636319": {
+    "chat_id": 6787636319,
+    "entries": [
+      {
+        "at": 1777477566,
+        "sender": "member",
+        "type": "text",
+        "text": "/start getkode",
+        "message_id": 1152
+      },
+      {
+        "at": 1777477566,
+        "sender": "member",
+        "type": "command",
+        "text": "/start getkode",
+        "message_id": 0
+      },
+      {
+        "at": 1777477567,
+        "sender": "bot",
+        "type": "text",
+        "text": "Di bantu berikan User ID-nya ya bosku. Contoh User ID: User1234",
+        "message_id": 1153
+      },
+      {
+        "at": 1777477577,
+        "sender": "member",
+        "type": "text",
+        "text": "/start getkode",
+        "message_id": 1154
+      },
+      {
+        "at": 1777477577,
+        "sender": "member",
+        "type": "command",
+        "text": "/start getkode",
+        "message_id": 0
+      },
+      {
+        "at": 1777477578,
+        "sender": "bot",
+        "type": "text",
+        "text": "Di bantu berikan User ID-nya ya bosku. Contoh User ID: User1234",
+        "message_id": 1155
+      },
+      {
+        "at": 1777477583,
+        "sender": "member",
+        "type": "text",
+        "text": "Bona723",
+        "message_id": 1156
+      },
+      {
+        "at": 1777477583,
+        "sender": "member",
+        "type": "text",
+        "text": "Bona723",
+        "message_id": 0
+      },
+      {
+        "at": 1777477587,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kode akses Lucky Spin kamu: `ZXYBTU` Simpan kode akses kamu dan lanjutkan pilih menu di bawah ini untuk melanjutkan memutar Lucky Spin nya.",
+        "message_id": 1157
+      },
+      {
+        "at": 1777477588,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kalau kamu sudah selesai spin, kirim screenshot hasil Lucky Spin di chat ini ya. Kalau lupa screenshot, tulis nominal hadiahnya saja.",
+        "message_id": 1158
+      },
+      {
+        "at": 1777477752,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 1164
+      },
+      {
+        "at": 1777477752,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 0
+      },
+      {
+        "at": 1777477757,
+        "sender": "bot",
+        "type": "text",
+        "text": "Berikan Screenshot dari Hasil Lucky Spin yang kamu dapatkan. Pastikan gambar tidak blur, tidak terpotong, dan tulisan hadiah terlihat jelas. Lalu kirim ulang screenshot hasil Lucky Spin kamu di cha...",
+        "message_id": 1166
+      },
+      {
+        "at": 1777477757,
+        "sender": "member",
+        "type": "text",
+        "text": "5000",
+        "message_id": 1165
+      },
+      {
+        "at": 1777477757,
+        "sender": "member",
+        "type": "text",
+        "text": "5000",
+        "message_id": 0
+      },
+      {
+        "at": 1777477758,
+        "sender": "bot",
+        "type": "text",
+        "text": "Untuk Selanjutnya nanti kamu jangan lupa Screenshot hasil lucky spin nya ya ! Hadiah kamu saya bantu proseskan, mohon di tunggu !!",
+        "message_id": 1168
+      },
+      {
+        "at": 1777477781,
+        "sender": "bot",
+        "type": "text",
+        "text": "Hadiah Lucky Spin Bona723 kamu telah di proseskan ya!!",
+        "message_id": 1174
+      }
+    ],
+    "first_name": "Matt Biondi",
+    "last_name": "",
+    "username": "mattbiondi45",
+    "user_id": 6787636319,
+    "last_message_preview": "Hadiah Lucky Spin Bona723 kamu telah di proseskan ya!!",
+    "updated_at": 1777477781
+  },
+  "6733848496": {
+    "chat_id": 6733848496,
+    "entries": [
+      {
+        "at": 1777477595,
+        "sender": "member",
+        "type": "text",
+        "text": "/start getkode",
+        "message_id": 1159
+      },
+      {
+        "at": 1777477595,
+        "sender": "member",
+        "type": "command",
+        "text": "/start getkode",
+        "message_id": 0
+      },
+      {
+        "at": 1777477596,
+        "sender": "bot",
+        "type": "text",
+        "text": "Di bantu berikan User ID-nya ya bosku. Contoh User ID: User1234",
+        "message_id": 1160
+      },
+      {
+        "at": 1777477645,
+        "sender": "member",
+        "type": "text",
+        "text": "Id:Orongos",
+        "message_id": 1161
+      },
+      {
+        "at": 1777477645,
+        "sender": "member",
+        "type": "text",
+        "text": "Id:Orongos",
+        "message_id": 0
+      },
+      {
+        "at": 1777477655,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kode akses Lucky Spin kamu: `GF9GHR` Simpan kode akses kamu dan lanjutkan pilih menu di bawah ini untuk melanjutkan memutar Lucky Spin nya.",
+        "message_id": 1162
+      },
+      {
+        "at": 1777477655,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kalau kamu sudah selesai spin, kirim screenshot hasil Lucky Spin di chat ini ya. Kalau lupa screenshot, tulis nominal hadiahnya saja.",
+        "message_id": 1163
+      },
+      {
+        "at": 1777477762,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 1169
+      },
+      {
+        "at": 1777477762,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 0
+      },
+      {
+        "at": 1777477764,
+        "sender": "bot",
+        "type": "text",
+        "text": "Berikan Screenshot dari Hasil Lucky Spin yang kamu dapatkan. Pastikan gambar tidak blur, tidak terpotong, dan tulisan hadiah terlihat jelas. Lalu kirim ulang screenshot hasil Lucky Spin kamu di cha...",
+        "message_id": 1170
+      },
+      {
+        "at": 1777477766,
+        "sender": "member",
+        "type": "text",
+        "text": "Ini ka",
+        "message_id": 1171
+      },
+      {
+        "at": 1777477766,
+        "sender": "member",
+        "type": "text",
+        "text": "Ini ka",
+        "message_id": 0
+      },
+      {
+        "at": 1777477766,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kalau kamu sudah spin, kirim screenshot hasil Lucky Spin di chat ini. Kalau lupa screenshot, tulis hadiah yang kamu dapat seperti 5000 atau 10000.",
+        "message_id": 1172
+      },
+      {
+        "at": 1777477925,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 1181
+      },
+      {
+        "at": 1777477925,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 0
+      },
+      {
+        "at": 1777477927,
+        "sender": "bot",
+        "type": "text",
+        "text": "Berikan Screenshot dari Hasil Lucky Spin yang kamu dapatkan. Pastikan gambar tidak blur, tidak terpotong, dan tulisan hadiah terlihat jelas. Lalu kirim ulang screenshot hasil Lucky Spin kamu di cha...",
+        "message_id": 1182
+      },
+      {
+        "at": 1777477944,
+        "sender": "bot",
+        "type": "photo",
+        "text": "Panduan klaim Lucky Spin: 1. Salin Kode akses yang telah di berikan. 2. Buka halaman Lcuky Spin. 3. Pada Kolom input USER ID kamu masukan user id atau username. 4. Pada kolom input Kode Akses kamu ...",
+        "message_id": 1186
+      },
+      {
+        "at": 1777478067,
+        "sender": "member",
+        "type": "text",
+        "text": "5000",
+        "message_id": 1196
+      },
+      {
+        "at": 1777478067,
+        "sender": "member",
+        "type": "text",
+        "text": "5000",
+        "message_id": 0
+      },
+      {
+        "at": 1777478069,
+        "sender": "bot",
+        "type": "text",
+        "text": "Untuk Selanjutnya nanti kamu jangan lupa Screenshot hasil lucky spin nya ya ! Hadiah kamu saya bantu proseskan, mohon di tunggu !!",
+        "message_id": 1198
+      },
+      {
+        "at": 1777478072,
+        "sender": "bot",
+        "type": "text",
+        "text": "Hadiah Lucky Spin Id:Orongos kamu telah di proseskan ya!!",
+        "message_id": 1200
+      },
+      {
+        "at": 1777478079,
+        "sender": "member",
+        "type": "text",
+        "text": "Baik ka",
+        "message_id": 1202
+      },
+      {
+        "at": 1777478079,
+        "sender": "member",
+        "type": "text",
+        "text": "Baik ka",
+        "message_id": 0
+      },
+      {
+        "at": 1777478080,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kalau kamu sudah spin, kirim screenshot hasil Lucky Spin di chat ini. Kalau lupa screenshot, tulis hadiah yang kamu dapat seperti 5000 atau 10000.",
+        "message_id": 1203
+      }
+    ],
+    "first_name": "Chee",
+    "last_name": "Keyy",
+    "username": "",
+    "user_id": 6733848496,
+    "last_message_preview": "Kalau kamu sudah spin, kirim screenshot hasil Lucky Spin di chat ini. Kalau l...",
+    "updated_at": 1777478080
+  },
+  "7317230875": {
+    "chat_id": 7317230875,
+    "entries": [
+      {
+        "at": 1777477882,
+        "sender": "member",
+        "type": "text",
+        "text": "/start getkode",
+        "message_id": 1176
+      },
+      {
+        "at": 1777477882,
+        "sender": "member",
+        "type": "command",
+        "text": "/start getkode",
+        "message_id": 0
+      },
+      {
+        "at": 1777477883,
+        "sender": "bot",
+        "type": "text",
+        "text": "Di bantu berikan User ID-nya ya bosku. Contoh User ID: User1234",
+        "message_id": 1177
+      },
+      {
+        "at": 1777477887,
+        "sender": "member",
+        "type": "text",
+        "text": "Santakaskus",
+        "message_id": 1178
+      },
+      {
+        "at": 1777477887,
+        "sender": "member",
+        "type": "text",
+        "text": "Santakaskus",
+        "message_id": 0
+      },
+      {
+        "at": 1777477895,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kode akses Lucky Spin kamu: `KACT2M` Simpan kode akses kamu dan lanjutkan pilih menu di bawah ini untuk melanjutkan memutar Lucky Spin nya.",
+        "message_id": 1179
+      },
+      {
+        "at": 1777477895,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kalau kamu sudah selesai spin, kirim screenshot hasil Lucky Spin di chat ini ya. Kalau lupa screenshot, tulis nominal hadiahnya saja.",
+        "message_id": 1180
+      },
+      {
+        "at": 1777477939,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 1183
+      },
+      {
+        "at": 1777477939,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 0
+      },
+      {
+        "at": 1777477942,
+        "sender": "bot",
+        "type": "text",
+        "text": "Selamat ya kamu mendapatkan Hadiah 5000 dari lucky spin Silakan tunggu proses pengecekan admin. Jika ada kendala, hubungi admin @horeg222",
+        "message_id": 1185
+      },
+      {
+        "at": 1777477948,
+        "sender": "bot",
+        "type": "text",
+        "text": "Hadiah Lucky Spin Santakaskus kamu telah di proseskan ya!!",
+        "message_id": 1189
+      },
+      {
+        "at": 1777477949,
+        "sender": "member",
+        "type": "text",
+        "text": "5000",
+        "message_id": 1188
+      },
+      {
+        "at": 1777477949,
+        "sender": "member",
+        "type": "text",
+        "text": "5000",
+        "message_id": 0
+      },
+      {
+        "at": 1777477950,
+        "sender": "bot",
+        "type": "text",
+        "text": "Untuk Selanjutnya nanti kamu jangan lupa Screenshot hasil lucky spin nya ya ! Hadiah kamu saya bantu proseskan, mohon di tunggu !!",
+        "message_id": 1192
+      },
+      {
+        "at": 1777477955,
+        "sender": "bot",
+        "type": "text",
+        "text": "Hadiah Lucky Spin Santakaskus kamu telah di proseskan ya!!",
+        "message_id": 1194
+      }
+    ],
+    "first_name": "ta",
+    "last_name": "",
+    "username": "",
+    "user_id": 7317230875,
+    "last_message_preview": "Hadiah Lucky Spin Santakaskus kamu telah di proseskan ya!!",
+    "updated_at": 1777477955
+  }
+}
