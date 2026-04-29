@@ -987,7 +987,7 @@ def start_dashboard_server(
     access_token: str | None = None,
 ) -> DashboardHTTPServer:
     resolved_host = host or os.getenv("DASHBOARD_HOST", "0.0.0.0")
-    resolved_port = int(port or os.getenv("DASHBOARD_PORT", os.getenv("PORT", "8080")))
+    resolved_port = int(port or os.getenv("PORT", os.getenv("DASHBOARD_PORT", "8080")))
     resolved_token = (access_token if access_token is not None else os.getenv("DASHBOARD_TOKEN", "")).strip()
     resolved_log_file = Path(log_file)
 

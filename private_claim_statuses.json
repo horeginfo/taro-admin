@@ -26,5 +26,12 @@
     "updated_at": 1777477954,
     "reward_amount": "5.000",
     "source": "text"
+  },
+  "8234048209": {
+    "member_user_id": "Mama05",
+    "status": "awaiting_admin",
+    "updated_at": 1777479859,
+    "reward_amount": "5.000",
+    "source": "screenshot"
   }
 }

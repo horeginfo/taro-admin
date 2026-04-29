@@ -452,5 +452,240 @@
     "user_id": 7317230875,
     "last_message_preview": "Hadiah Lucky Spin Santakaskus kamu telah di proseskan ya!!",
     "updated_at": 1777477955
+  },
+  "8234048209": {
+    "chat_id": 8234048209,
+    "entries": [
+      {
+        "at": 1777478443,
+        "sender": "member",
+        "type": "text",
+        "text": "/start getkode",
+        "message_id": 1204
+      },
+      {
+        "at": 1777478443,
+        "sender": "member",
+        "type": "command",
+        "text": "/start getkode",
+        "message_id": 0
+      },
+      {
+        "at": 1777478443,
+        "sender": "bot",
+        "type": "text",
+        "text": "Di bantu berikan User ID-nya ya bosku. Contoh User ID: User1234",
+        "message_id": 1205
+      },
+      {
+        "at": 1777478464,
+        "sender": "member",
+        "type": "text",
+        "text": "Mama05",
+        "message_id": 1206
+      },
+      {
+        "at": 1777478464,
+        "sender": "member",
+        "type": "text",
+        "text": "Mama05",
+        "message_id": 0
+      },
+      {
+        "at": 1777478469,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kode akses Lucky Spin kamu: `ES83VF` Simpan kode akses kamu dan lanjutkan pilih menu di bawah ini untuk melanjutkan memutar Lucky Spin nya.",
+        "message_id": 1207
+      },
+      {
+        "at": 1777478469,
+        "sender": "bot",
+        "type": "text",
+        "text": "Kalau kamu sudah selesai spin, kirim screenshot hasil Lucky Spin di chat ini ya. Kalau lupa screenshot, tulis nominal hadiahnya saja.",
+        "message_id": 1208
+      },
+      {
+        "at": 1777478630,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 1209
+      },
+      {
+        "at": 1777478630,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 0
+      },
+      {
+        "at": 1777478638,
+        "sender": "bot",
+        "type": "text",
+        "text": "Berikan Screenshot dari Hasil Lucky Spin yang kamu dapatkan. Pastikan gambar tidak blur, tidak terpotong, dan tulisan hadiah terlihat jelas. Lalu kirim ulang screenshot hasil Lucky Spin kamu di cha...",
+        "message_id": 1210
+      },
+      {
+        "at": 1777478728,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 1211
+      },
+      {
+        "at": 1777478728,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 0
+      },
+      {
+        "at": 1777478730,
+        "sender": "bot",
+        "type": "text",
+        "text": "Berikan Screenshot dari Hasil Lucky Spin yang kamu dapatkan. Pastikan gambar tidak blur, tidak terpotong, dan tulisan hadiah terlihat jelas. Lalu kirim ulang screenshot hasil Lucky Spin kamu di cha...",
+        "message_id": 1212
+      },
+      {
+        "at": 1777478805,
+        "sender": "member",
+        "type": "text",
+        "text": "/start getkode",
+        "message_id": 1213
+      },
+      {
+        "at": 1777478805,
+        "sender": "member",
+        "type": "command",
+        "text": "/start getkode",
+        "message_id": 0
+      },
+      {
+        "at": 1777478806,
+        "sender": "bot",
+        "type": "text",
+        "text": "Di bantu berikan User ID-nya ya bosku. Contoh User ID: User1234",
+        "message_id": 1214
+      },
+      {
+        "at": 1777478826,
+        "sender": "member",
+        "type": "text",
+        "text": "Mama05",
+        "message_id": 1215
+      },
+      {
+        "at": 1777478826,
+        "sender": "member",
+        "type": "text",
+        "text": "Mama05",
+        "message_id": 0
+      },
+      {
+        "at": 1777478837,
+        "sender": "bot",
+        "type": "text",
+        "text": "Lucky spin dapat di klaim 1 kali dalam 1 hari , info selanjutnya bisa Hub admin @horeg222",
+        "message_id": 1216
+      },
+      {
+        "at": 1777478905,
+        "sender": "member",
+        "type": "text",
+        "text": "/start getkode",
+        "message_id": 1217
+      },
+      {
+        "at": 1777478905,
+        "sender": "member",
+        "type": "command",
+        "text": "/start getkode",
+        "message_id": 0
+      },
+      {
+        "at": 1777478905,
+        "sender": "bot",
+        "type": "text",
+        "text": "Di bantu berikan User ID-nya ya bosku. Contoh User ID: User1234",
+        "message_id": 1218
+      },
+      {
+        "at": 1777478916,
+        "sender": "member",
+        "type": "text",
+        "text": "Kok belum masuk2",
+        "message_id": 1219
+      },
+      {
+        "at": 1777478916,
+        "sender": "member",
+        "type": "text",
+        "text": "Kok belum masuk2",
+        "message_id": 0
+      },
+      {
+        "at": 1777478921,
+        "sender": "bot",
+        "type": "text",
+        "text": "Lucky spin dapat di klaim 1 kali dalam 1 hari , info selanjutnya bisa Hub admin @horeg222",
+        "message_id": 1220
+      },
+      {
+        "at": 1777478926,
+        "sender": "bot",
+        "type": "photo",
+        "text": "Panduan klaim Lucky Spin: 1. Salin Kode akses yang telah di berikan. 2. Buka halaman Lcuky Spin. 3. Pada Kolom input USER ID kamu masukan user id atau username. 4. Pada kolom input Kode Akses kamu ...",
+        "message_id": 1221
+      },
+      {
+        "at": 1777479856,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 1222
+      },
+      {
+        "at": 1777479856,
+        "sender": "member",
+        "type": "photo",
+        "text": "[photo]",
+        "message_id": 0
+      },
+      {
+        "at": 1777479860,
+        "sender": "bot",
+        "type": "text",
+        "text": "Selamat ya kamu mendapatkan Hadiah 5000 dari lucky spin Silakan tunggu proses pengecekan admin. Jika ada kendala, hubungi admin @horeg222",
+        "message_id": 1224
+      },
+      {
+        "at": 1777480468,
+        "sender": "member",
+        "type": "text",
+        "text": ". kok belum masuk2",
+        "message_id": 1225
+      },
+      {
+        "at": 1777480468,
+        "sender": "member",
+        "type": "text",
+        "text": ". kok belum masuk2",
+        "message_id": 0
+      },
+      {
+        "at": 1777480469,
+        "sender": "bot",
+        "type": "text",
+        "text": "Klaim Lucky Spin kamu dengan User ID Mama05 untuk hadiah 5.000 sudah saya teruskan ke admin. Status saat ini: menunggu proses admin.",
+        "message_id": 1226
+      }
+    ],
+    "first_name": "Rons",
+    "last_name": "Garage",
+    "username": "",
+    "user_id": 8234048209,
+    "last_message_preview": "Klaim Lucky Spin kamu dengan User ID Mama05 untuk hadiah 5.000 sudah saya ter...",
+    "updated_at": 1777480469
   }
 }

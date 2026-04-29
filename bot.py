@@ -60,6 +60,8 @@ ADMIN_DASHBOARD_ENTRY_PAGE_SIZE = 12
 CLAIM_STATUS_VALIDATED = "validated"
 CLAIM_STATUS_AWAITING_ADMIN = "awaiting_admin"
 CLAIM_STATUS_COMPLETED = "completed"
+ADMIN_PENDING_KIND_REWARD_CLAIM = "reward_claim"
+ADMIN_PENDING_KIND_DEPOSIT_CHECK = "deposit_check"
 
 CODES_TIER_5K = {
     "VSRYF2", "6F7QX6", "F3AXDW", "S8Q4L6", "M6E83K", "HCLENZ", "HY7CAC", "9DSLFY", "ZXYBTU", "GF9GHR",
@@ -148,8 +150,12 @@ def build_dashboard_web_url() -> str:
     if public_url:
         return public_url.rstrip("/")
 
+    railway_public_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+    if railway_public_domain:
+        return f"https://{railway_public_domain}".rstrip("/")
+
     host = os.getenv("DASHBOARD_HOST", "127.0.0.1").strip() or "127.0.0.1"
-    port = os.getenv("DASHBOARD_PORT", os.getenv("PORT", "8080")).strip() or "8080"
+    port = os.getenv("PORT", os.getenv("DASHBOARD_PORT", "8080")).strip() or "8080"
     if host == "0.0.0.0":
         host = "127.0.0.1"
     return f"http://{host}:{port}"
@@ -723,11 +729,13 @@ async def send_logged_private_text(
     chat_id: int,
     text: str,
     reply_markup=None,
+    parse_mode: str | None = None,
 ):
     sent_message = await context.bot.send_message(
         chat_id=chat_id,
         text=text,
         reply_markup=reply_markup,
+        parse_mode=parse_mode,
     )
     log_private_chat_event(
         context,
@@ -738,6 +746,37 @@ async def send_logged_private_text(
         telegram_message_id=getattr(sent_message, "message_id", None),
     )
     return sent_message
+
+
+async def notify_admin_deposit_check(
+    context: ContextTypes.DEFAULT_TYPE,
+    member_chat_id: int,
+    member_user_id: str,
+    member_telegram_id: str,
+) -> bool:
+    admin_target = os.getenv("ADMIN_CHAT_ID", "").strip() or f"@{os.getenv('ADMIN_USERNAME', ADMIN_USERNAME).lstrip('@')}"
+    admin_message = await context.bot.send_message(
+        chat_id=admin_target,
+        text=(
+            "Cek deposit member untuk Lucky Spin.\n"
+            f"User ID: {member_user_id}\n"
+            f"Telegram ID: {member_telegram_id}\n\n"
+            "Balas pesan ini dengan:\n"
+            "- sudah\n"
+            "- belum depo"
+        ),
+    )
+
+    pending_claims = get_pending_admin_claims_store(context)
+    pending_claims[str(admin_message.message_id)] = {
+        "kind": ADMIN_PENDING_KIND_DEPOSIT_CHECK,
+        "member_chat_id": member_chat_id,
+        "member_user_id": member_user_id,
+        "member_telegram_id": member_telegram_id,
+    }
+    save_pending_admin_claims(pending_claims)
+    context.bot_data[PENDING_ADMIN_CLAIMS_KEY] = pending_claims
+    return True
 
 
 async def capture_private_incoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1493,6 +1532,7 @@ async def notify_admin_claim(
 
     pending_claims = get_pending_admin_claims_store(context)
     pending_claims[str(admin_message.message_id)] = {
+        "kind": ADMIN_PENDING_KIND_REWARD_CLAIM,
         "member_chat_id": member_chat_id,
         "member_user_id": member_user_id,
         "reward_amount": reward_amount,
@@ -1522,6 +1562,7 @@ async def notify_admin_claim_by_amount(
 
     pending_claims = get_pending_admin_claims_store(context)
     pending_claims[str(admin_message.message_id)] = {
+        "kind": ADMIN_PENDING_KIND_REWARD_CLAIM,
         "member_chat_id": member_chat_id,
         "member_user_id": member_user_id,
         "reward_amount": normalized_amount,
@@ -1611,6 +1652,59 @@ async def handle_private_reward_text(update: Update, context: ContextTypes.DEFAU
     return False
 
 
+async def deliver_private_access_code(
+    context: ContextTypes.DEFAULT_TYPE,
+    member_chat_id: int,
+    member_user_id: str,
+    member_telegram_id: str,
+) -> tuple[bool, str]:
+    try:
+        result = claim_code_from_apps_script(
+            user_id=member_user_id,
+            tele_id=member_telegram_id,
+        )
+    except RuntimeError as exc:
+        print(f"Gagal claim kode via Apps Script setelah konfirmasi admin: {exc}")
+        return False, "Sistem kode akses sedang bermasalah. Coba lagi beberapa saat."
+
+    if result.get("ok"):
+        data = result.get("data", {})
+        code = str(data.get("kode", "")).strip().upper()
+        update_private_claim_status(
+            context,
+            member_chat_id,
+            CLAIM_STATUS_VALIDATED,
+            member_user_id=member_user_id,
+        )
+        await send_logged_private_text(
+            context,
+            chat_id=member_chat_id,
+            text=(
+                "Kode akses Lucky Spin kamu:\n\n"
+                f"`{code}`\n\n"
+                "Simpan kode akses kamu dan lanjutkan pilih menu di bawah ini untuk melanjutkan memutar Lucky Spin nya."
+            ),
+            reply_markup=build_private_menu(),
+            parse_mode="Markdown",
+        )
+        await send_logged_private_text(
+            context,
+            chat_id=member_chat_id,
+            text=(
+                "Kalau kamu sudah selesai spin, kirim screenshot hasil Lucky Spin di chat ini ya.\n"
+                "Kalau lupa screenshot, tulis nominal hadiahnya saja."
+            ),
+        )
+        return True, "Kode akses berhasil dikirim ke member."
+
+    status = str(result.get("status", "")).strip().lower()
+    message = str(result.get("message", "")).strip() or "Kode akses tidak bisa diproses."
+    await send_logged_private_text(context, chat_id=member_chat_id, text=message)
+    if status == "already_claimed":
+        return True, "Member sudah pernah klaim kode akses."
+    return False, message
+
+
 async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_chat or not update.effective_user:
         return False
@@ -1619,7 +1713,8 @@ async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_
         return False
 
     incoming_text = update.message.text.strip().lower()
-    if incoming_text != "done":
+    normalized_text = normalize_message_text(incoming_text)
+    if normalized_text not in {"done", "sudah", "udah", "belum depo", "belum deposit", "belum"}:
         return False
 
     admin_username = (update.effective_user.username or "").lower()
@@ -1631,7 +1726,11 @@ async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_
         return False
 
     if not update.message.reply_to_message:
-        await reply_logged_text(update.message, context, "Balas pesan klaim admin dengan teks Done.")
+        await reply_logged_text(
+            update.message,
+            context,
+            "Balas pesan admin yang benar dengan teks Done, sudah, atau belum depo."
+        )
         return True
 
     pending_claims = get_pending_admin_claims_store(context)
@@ -1641,20 +1740,54 @@ async def handle_admin_done_reply(update: Update, context: ContextTypes.DEFAULT_
         claim_key = reply_key
 
     if not claim_key:
-        await reply_logged_text(update.message, context, "Pesan klaim tidak ditemukan. Balas langsung pesan klaim yang benar dengan teks Done.")
+        await reply_logged_text(
+            update.message,
+            context,
+            "Pesan admin tidak ditemukan. Balas langsung pesan bot yang benar dengan teks Done, sudah, atau belum depo."
+        )
         return True
 
     claim_data = pending_claims.pop(claim_key, None)
     save_pending_admin_claims(pending_claims)
+    context.bot_data[PENDING_ADMIN_CLAIMS_KEY] = pending_claims
     if not isinstance(claim_data, dict):
         await reply_logged_text(update.message, context, "Pesan klaim tidak ditemukan atau sudah diproses.")
         return True
 
+    pending_kind = str(claim_data.get("kind", ADMIN_PENDING_KIND_REWARD_CLAIM)).strip() or ADMIN_PENDING_KIND_REWARD_CLAIM
     member_chat_id = claim_data.get("member_chat_id")
     member_user_id = str(claim_data.get("member_user_id", "")).strip() or "member"
     reward_amount = str(claim_data.get("reward_amount", "")).strip()
     if not member_chat_id:
         await reply_logged_text(update.message, context, "Data member untuk klaim ini tidak valid.")
+        return True
+
+    if pending_kind == ADMIN_PENDING_KIND_DEPOSIT_CHECK:
+        member_telegram_id = str(claim_data.get("member_telegram_id", "")).strip() or str(member_chat_id)
+        if normalized_text in {"belum depo", "belum deposit", "belum"}:
+            await send_logged_private_text(
+                context,
+                chat_id=member_chat_id,
+                text="silahkan bosku melakukan deposit terlebih dahulu agar bisa mendapatkan kode Akses nya.",
+            )
+            await reply_logged_text(update.message, context, "Member diberi info untuk deposit terlebih dahulu.")
+            return True
+
+        if normalized_text in {"sudah", "udah"}:
+            delivered, admin_message = await deliver_private_access_code(
+                context=context,
+                member_chat_id=int(member_chat_id),
+                member_user_id=member_user_id,
+                member_telegram_id=member_telegram_id,
+            )
+            await reply_logged_text(update.message, context, admin_message)
+            return True
+
+        await reply_logged_text(update.message, context, "Untuk cek deposit, balas dengan 'sudah' atau 'belum depo'.")
+        return True
+
+    if normalized_text != "done":
+        await reply_logged_text(update.message, context, "Untuk konfirmasi hadiah, balas pesan klaim dengan teks Done.")
         return True
 
     update_private_claim_status(
@@ -1886,56 +2019,29 @@ async def handle_claim_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return True
 
         try:
-            result = claim_code_from_apps_script(
-                user_id=user_id,
-                tele_id=str(update.effective_user.id) if update.effective_user else "",
+            await notify_admin_deposit_check(
+                context=context,
+                member_chat_id=update.effective_chat.id if update.effective_chat else 0,
+                member_user_id=user_id,
+                member_telegram_id=str(update.effective_user.id) if update.effective_user else "",
             )
-        except RuntimeError as exc:
+        except Exception as exc:
             reset_user_state(context)
-            print(f"Gagal claim kode via Apps Script: {exc}")
+            print(f"Gagal mengirim permintaan cek deposit ke admin: {exc}")
             await reply_logged_text(
                 update.message,
                 context,
-                "Sistem kode akses sedang bermasalah. Coba lagi beberapa saat."
+                "Permintaan cek deposit ke admin sedang bermasalah. Coba lagi beberapa saat."
             )
             return True
 
         reset_user_state(context)
-
-        if result.get("ok"):
-            data = result.get("data", {})
-            code = str(data.get("kode", "")).strip().upper()
-            context.user_data["validated_user_id"] = user_id
-            update_private_claim_status(
-                context,
-                update.effective_chat.id if update.effective_chat else None,
-                CLAIM_STATUS_VALIDATED,
-                member_user_id=user_id,
-            )
-            await reply_logged_text(
-                update.message,
-                context,
-                "Kode akses Lucky Spin kamu:\n\n"
-                f"`{code}`\n\n"
-                "Simpan kode akses kamu dan lanjutkan pilih menu di bawah ini untuk melanjutkan memutar Lucky Spin nya.",
-                parse_mode="Markdown",
-                reply_markup=build_private_menu(),
-            )
-            await reply_logged_text(
-                update.message,
-                context,
-                "Kalau kamu sudah selesai spin, kirim screenshot hasil Lucky Spin di chat ini ya.\n"
-                "Kalau lupa screenshot, tulis nominal hadiahnya saja."
-            )
-            return True
-
-        status = str(result.get("status", "")).strip().lower()
-        message = str(result.get("message", "")).strip() or "Kode akses tidak bisa diproses."
-        if status == "already_claimed":
-            await reply_logged_text(update.message, context, message)
-            return True
-
-        await reply_logged_text(update.message, context, message)
+        await reply_logged_text(
+            update.message,
+            context,
+            "User ID kamu sudah saya kirim ke admin untuk dicek dulu depositnya ya bosku.\n"
+            "Tunggu sebentar, setelah admin balas saya akan lanjut bantu kirim kode akses Lucky Spin."
+        )
         return True
 
     if step == STEP_USER_ID:
@@ -2093,7 +2199,7 @@ def main() -> None:
     dashboard_server = start_dashboard_server(
         log_file=PRIVATE_CHAT_LOG_FILE,
         host=os.getenv("DASHBOARD_HOST", "").strip() or None,
-        port=int(os.getenv("DASHBOARD_PORT", os.getenv("PORT", "8080"))),
+        port=int(os.getenv("PORT", os.getenv("DASHBOARD_PORT", "8080"))),
         access_token=os.getenv("DASHBOARD_TOKEN", "").strip() or None,
     )
 
